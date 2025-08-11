@@ -1,8 +1,8 @@
 <?php
 // classes/AchievementsManager.php
 
-require_once 'config/database.php';
-require_once 'classes/Auth.php';
+require_once '../config/database.php';
+require_once 'Auth.php';
 
 class AchievementsManager {
     private $db;
@@ -47,7 +47,7 @@ class AchievementsManager {
             ];
             
         } catch (Exception $e) {
-            writeErrorLog("Get achievements error: " . $e->getMessage());
+            Database::getInstance()->writeLog("Get achievements error: " . $e->getMessage(), 'error');
             return ['error' => 'Помилка отримання даних', 'code' => 500];
         }
     }
@@ -115,7 +115,7 @@ class AchievementsManager {
             
         } catch (Exception $e) {
             $this->db->rollBack();
-            writeErrorLog("Update achievements error: " . $e->getMessage());
+            Database::getInstance()->writeLog("Update achievements error: " . $e->getMessage(), 'error');
             return ['error' => 'Помилка збереження даних', 'code' => 500];
         }
     }
@@ -192,7 +192,7 @@ class AchievementsManager {
             return $this->updateAchievements($userId, $achievementsData, $currentUser);
             
         } catch (Exception $e) {
-            writeErrorLog("CSV import error: " . $e->getMessage());
+            Database::getInstance()->writeLog("CSV import error: " . $e->getMessage(), 'error');
             return ['error' => 'Помилка імпорту CSV', 'code' => 500];
         }
     }
@@ -259,7 +259,7 @@ class AchievementsManager {
             ];
             
         } catch (Exception $e) {
-            writeErrorLog("Get users list error: " . $e->getMessage());
+            Database::getInstance()->writeLog("Get users list error: " . $e->getMessage(), 'error');
             return ['error' => 'Помилка отримання списку користувачів', 'code' => 500];
         }
     }
@@ -326,7 +326,7 @@ class AchievementsManager {
             ];
             
         } catch (Exception $e) {
-            writeErrorLog("Export report error: " . $e->getMessage());
+            Database::getInstance()->writeLog("Export report error: " . $e->getMessage(), 'error');
             return ['error' => 'Помилка експорту звіту', 'code' => 500];
         }
     }
@@ -369,7 +369,7 @@ class AchievementsManager {
             return $achievements;
             
         } catch (Exception $e) {
-            writeErrorLog("Create empty achievements error: " . $e->getMessage());
+            Database::getInstance()->writeLog("Create empty achievements error: " . $e->getMessage(), 'error');
             throw $e;
         }
     }
@@ -513,7 +513,7 @@ class AchievementsManager {
             ");
             $stmt->execute([$userId, $action, $description, $ipAddress, $userAgent]);
         } catch (Exception $e) {
-            writeErrorLog("Log activity error: " . $e->getMessage());
+            Database::getInstance()->writeLog("Log activity error: " . $e->getMessage(), 'error');
         }
     }
 }
