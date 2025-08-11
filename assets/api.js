@@ -5,7 +5,7 @@
  */
 class ApiClient {
     constructor() {
-        this.baseUrl = '/edebo-system/api';
+        this.baseUrl = '/api';
         this.sessionId = this.getSessionId();
         this.requestId = 0;
     }
