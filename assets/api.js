@@ -282,6 +282,8 @@ class ApiClient {
      */
     async login(employeeId, password) {
         const response = await this.post('auth/login', {
+			//const response = await this.post('debug_login', { //временная замена для отладки
+			//const response = await this.post('simple_login', {
             employee_id: employeeId,
             password: password
         });

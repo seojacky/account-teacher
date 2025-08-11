@@ -1,0 +1,44 @@
+# .htaccess для системи ЄДЕБО
+
+# Увімкнення mod_rewrite
+RewriteEngine On
+
+# Перенаправлення API запитів до api/index.php (крім існуючих файлів)
+RewriteCond %{REQUEST_URI} ^/api/(.*)$
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteRule ^api/(.*)$ api/index.php [QSA,L]
+
+# Безпека - приховування чутливих файлів
+<Files "*.sql">
+    Order Allow,Deny
+    Deny from all
+</Files>
+
+<FilesMatch "\.(log|bak|backup|swp|tmp)$">
+    Order Allow,Deny
+    Deny from all
+</FilesMatch>
+
+# Налаштування кодування
+AddDefaultCharset UTF-8
+
+# Заборона листингу директорій
+Options -Indexes
+
+# Налаштування безпеки
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options nosniff
+    Header always set X-Frame-Options DENY
+    Header always set X-XSS-Protection "1; mode=block"
+</IfModule>
+
+# Кешування статичних файлів
+<IfModule mod_expires.c>
+    ExpiresActive On
+    ExpiresByType text/css "access plus 1 month"
+    ExpiresByType application/javascript "access plus 1 month"
+    ExpiresByType image/png "access plus 1 month"
+    ExpiresByType image/jpg "access plus 1 month"
+    ExpiresByType image/jpeg "access plus 1 month"
+    ExpiresByType image/gif "access plus 1 month"
+</IfModule>
