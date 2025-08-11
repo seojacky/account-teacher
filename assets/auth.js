@@ -29,7 +29,6 @@ class AuthManager {
         await this.checkAuthStatus();
         
         this.isInitialized = true;
-        console.log('[Auth] Менеджер авторизации инициализирован');
     }
 
     /**
@@ -124,12 +123,9 @@ class AuthManager {
                 }
                 
                 window.toast.success('Успішно авторизовано!');
-                console.log('[Auth] Авторизация успешна:', this.currentUser);
             }
 
         } catch (error) {
-            console.error('[Auth] Ошибка авторизации:', error);
-            
             if (error instanceof ApiError) {
                 if (error.status === 401) {
                     this.showLoginError('Неправильний ID працівника або пароль');
@@ -155,7 +151,7 @@ class AuthManager {
         try {
             await window.api.logout();
         } catch (error) {
-            console.error('[Auth] Ошибка при выходе:', error);
+            // Игнорируем ошибки выхода
         } finally {
             this.onLogoutSuccess();
         }
@@ -202,8 +198,6 @@ class AuthManager {
             event.target.reset();
 
         } catch (error) {
-            console.error('[Auth] Ошибка смены пароля:', error);
-            
             if (error instanceof ApiError) {
                 window.toast.error(error.message || 'Помилка зміни паролю');
             } else {
@@ -238,13 +232,10 @@ class AuthManager {
                     window.app.showMainApp();
                 }
                 
-                console.log('[Auth] Сессия восстановлена:', this.currentUser);
                 return true;
             }
 
         } catch (error) {
-            console.error('[Auth] Ошибка проверки сессии:', error);
-            
             if (error instanceof ApiError && error.status === 401) {
                 // Сессия истекла
                 this.onLogoutSuccess();
@@ -288,8 +279,6 @@ class AuthManager {
         if (window.app && window.app.showLoginScreen) {
             window.app.showLoginScreen();
         }
-        
-        console.log('[Auth] Выход выполнен');
     }
 
     /**
@@ -363,8 +352,6 @@ class AuthManager {
                 adminNav.style.display = 'none';
             }
         }
-
-        console.log(`[Auth] Права доступа настроены для роли: ${role}`);
     }
 
     /**
@@ -377,7 +364,6 @@ class AuthManager {
                 await window.api.getCurrentUser();
             } catch (error) {
                 if (error instanceof ApiError && error.status === 401) {
-                    console.log('[Auth] Сессия истекла');
                     this.onLogoutSuccess();
                     window.toast.warning('Сесія завершена. Увійдіть знову.');
                 }
@@ -523,8 +509,6 @@ class AuthManager {
         if (this.loginForm) {
             this.loginForm.removeEventListener('submit', this.handleLogin);
         }
-        
-        console.log('[Auth] Менеджер авторизации уничтожен');
     }
 }
 

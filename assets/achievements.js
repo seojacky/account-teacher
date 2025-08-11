@@ -121,7 +121,6 @@ class AchievementsManager {
         }
         
         this.isInitialized = true;
-        console.log('[Achievements] Менеджер достижений инициализирован');
     }
 
     /**
@@ -137,8 +136,6 @@ class AchievementsManager {
             const groupElement = this.createAchievementGroup(group);
             container.appendChild(groupElement);
         });
-
-        console.log('[Achievements] Форма достижений создана');
     }
 
     /**
@@ -214,8 +211,6 @@ class AchievementsManager {
         if (csvFileInput) {
             csvFileInput.addEventListener('change', this.handleFileImport.bind(this));
         }
-
-        console.log('[Achievements] Обработчики событий настроены');
     }
 
     /**
@@ -244,13 +239,9 @@ class AchievementsManager {
                 this.achievementsData = response.data;
                 this.fillForm(response.data);
                 this.isFormDirty = false;
-                
-                console.log('[Achievements] Достижения загружены');
             }
 
         } catch (error) {
-            console.error('[Achievements] Ошибка загрузки достижений:', error);
-            
             if (error instanceof ApiError) {
                 window.toast.error(`Помилка завантаження досягнень: ${error.message}`);
             } else {
@@ -330,13 +321,9 @@ class AchievementsManager {
                 if (!silent) {
                     window.toast.success('Досягнення успішно збережено!');
                 }
-                
-                console.log('[Achievements] Достижения сохранены');
             }
 
         } catch (error) {
-            console.error('[Achievements] Ошибка сохранения:', error);
-            
             if (!silent) {
                 if (error instanceof ApiError) {
                     window.toast.error(`Помилка збереження: ${error.message}`);
@@ -414,8 +401,6 @@ class AchievementsManager {
             window.toast.success('Файл успішно завантажено!');
             
         } catch (error) {
-            console.error('[Achievements] Ошибка экспорта:', error);
-            
             if (error instanceof ApiError) {
                 window.toast.error(`Помилка експорту: ${error.message}`);
             } else {
@@ -463,8 +448,6 @@ class AchievementsManager {
             }
 
         } catch (error) {
-            console.error('[Achievements] Ошибка импорта:', error);
-            
             if (error instanceof ApiError) {
                 window.toast.error(`Помилка імпорту: ${error.message}`);
             } else {
@@ -532,87 +515,6 @@ class AchievementsManager {
     }
 
     /**
-     * Заполнение примерами
-     */
-    fillWithExamples() {
-        const examples = window.achievementExamples || {};
-        
-        for (let i = 1; i <= 20; i++) {
-            const textarea = document.querySelector(`textarea[name="achievement_${i}"]`);
-            const exampleKey = `achievement${i}`;
-            
-            if (textarea && examples[exampleKey]) {
-                textarea.value = examples[exampleKey];
-                this.handleTextareaChange({ target: textarea });
-            }
-        }
-
-        this.isFormDirty = true;
-        window.toast.info('Форма заповнена прикладами');
-    }
-
-    /**
-     * Поиск по достижениям
-     */
-    searchAchievements(query) {
-        if (!query.trim()) {
-            // Показываем все группы
-            document.querySelectorAll('.achievement-group').forEach(group => {
-                group.style.display = 'block';
-            });
-            return;
-        }
-
-        const searchQuery = query.toLowerCase();
-        
-        document.querySelectorAll('.achievement-group').forEach(group => {
-            const title = group.querySelector('.achievement-title').textContent.toLowerCase();
-            const textarea = group.querySelector('.achievement-textarea');
-            const content = textarea ? textarea.value.toLowerCase() : '';
-            
-            if (title.includes(searchQuery) || content.includes(searchQuery)) {
-                group.style.display = 'block';
-                // Разворачиваем найденную группу
-                group.classList.add('expanded');
-            } else {
-                group.style.display = 'none';
-            }
-        });
-    }
-
-    /**
-     * Получение статистики заполнения
-     */
-    getCompletionStats() {
-        let filled = 0;
-        let total = 20;
-        
-        for (let i = 1; i <= 20; i++) {
-            const textarea = document.querySelector(`textarea[name="achievement_${i}"]`);
-            if (textarea && textarea.value.trim()) {
-                filled++;
-            }
-        }
-        
-        return {
-            filled,
-            total,
-            percentage: Math.round((filled / total) * 100)
-        };
-    }
-
-    /**
-     * Показ статистики заполнения
-     */
-    showCompletionStats() {
-        const stats = this.getCompletionStats();
-        
-        window.toast.info(
-            `Заповнено ${stats.filled} з ${stats.total} груп досягнень (${stats.percentage}%)`
-        );
-    }
-
-    /**
      * Загрузка достижений другого пользователя (для администраторов)
      */
     async loadUserAchievements(userId) {
@@ -640,221 +542,6 @@ class AchievementsManager {
         if (form) {
             form.removeEventListener('submit', this.handleFormSubmit);
         }
-        
-        console.log('[Achievements] Менеджер достижений уничтожен');
-    }
-}
-
-/**
- * Утилиты для работы с достижениями
- */
-class AchievementsUtils {
-    /**
-     * Подсчет слов в тексте
-     */
-    static countWords(text) {
-        if (!text || typeof text !== 'string') return 0;
-        return text.trim().split(/\s+/).filter(word => word.length > 0).length;
-    }
-
-    /**
-     * Подсчет символов в тексте
-     */
-    static countCharacters(text) {
-        if (!text || typeof text !== 'string') return 0;
-        return text.length;
-    }
-
-    /**
-     * Валидация содержимого достижения
-     */
-    static validateAchievement(text) {
-        const errors = [];
-        
-        if (!text || !text.trim()) {
-            return errors; // Пустые поля разрешены
-        }
-        
-        const wordCount = this.countWords(text);
-        const charCount = this.countCharacters(text);
-        
-        if (wordCount < 3) {
-            errors.push('Занадто коротке описання (мінімум 3 слова)');
-        }
-        
-        if (charCount > 5000) {
-            errors.push('Занадто довге описання (максимум 5000 символів)');
-        }
-        
-        return errors;
-    }
-
-    /**
-     * Форматирование текста для экспорта
-     */
-    static formatForExport(text) {
-        if (!text) return '';
-        
-        return text
-            .replace(/\r\n/g, '\n')
-            .replace(/\r/g, '\n')
-            .replace(/\n{3,}/g, '\n\n')
-            .trim();
-    }
-
- /**
-     * Очистка текста от лишних символов
-     */
-    static cleanText(text) {
-        if (!text) return '';
-        
-        return text
-            .replace(/[\u2018\u2019]/g, "'")   // Smart quotes
-            .replace(/[\u201C\u201D]/g, '"')   // Smart double quotes
-            .replace(/[\u2013\u2014]/g, '-')   // Em dash і En dash
-            .replace(/\s+/g, ' ')              // Множественные пробелы
-            .trim();
-    }
-
-    /**
-     * Извлечение ключевых слов из текста
-     */
-    static extractKeywords(text, limit = 10) {
-        if (!text) return [];
-        
-        const words = text.toLowerCase()
-            .replace(/[^\wа-яёїіє\s]/g, '')
-            .split(/\s+/)
-            .filter(word => word.length > 3);
-        
-        // Подсчитываем частоту слов
-        const frequency = {};
-        words.forEach(word => {
-            frequency[word] = (frequency[word] || 0) + 1;
-        });
-        
-        // Сортируем по частоте и возвращаем топ
-        return Object.entries(frequency)
-            .sort(([,a], [,b]) => b - a)
-            .slice(0, limit)
-            .map(([word]) => word);
-    }
-
-    /**
-     * Проверка на дублирование контента
-     */
-    static checkDuplicates(achievements) {
-        const duplicates = [];
-        const texts = [];
-        
-        Object.entries(achievements).forEach(([key, value]) => {
-            if (value && value.trim()) {
-                const cleanValue = this.cleanText(value);
-                const existing = texts.find(item => 
-                    this.similarity(item.text, cleanValue) > 0.8
-                );
-                
-                if (existing) {
-                    duplicates.push({
-                        field1: existing.field,
-                        field2: key,
-                        similarity: this.similarity(existing.text, cleanValue)
-                    });
-                } else {
-                    texts.push({ field: key, text: cleanValue });
-                }
-            }
-        });
-        
-        return duplicates;
-    }
-
-    /**
-     * Вычисление схожести двух текстов
-     */
-    static similarity(text1, text2) {
-        const words1 = new Set(text1.toLowerCase().split(/\s+/));
-        const words2 = new Set(text2.toLowerCase().split(/\s+/));
-        
-        const intersection = new Set([...words1].filter(x => words2.has(x)));
-        const union = new Set([...words1, ...words2]);
-        
-        return intersection.size / union.size;
-    }
-
-    /**
-     * Генерация шаблона для группы достижений
-     */
-    static generateTemplate(groupNumber) {
-        const templates = {
-            1: "1. Наукова публікація у періодичному виданні:\n   - Назва статті: \n   - Журнал: \n   - Рік: \n   - Том/Випуск: \n   - Сторінки: \n\n2. ",
-            2: "1. Патент на винахід/корисну модель:\n   - Назва: \n   - Номер патенту: \n   - Дата видачі: \n   - Власники: \n\n2. ",
-            3: "1. Підручник/навчальний посібник:\n   - Назва: \n   - Автори/співавтори: \n   - Видавництво: \n   - Рік видання: \n   - Обсяг: \n",
-            5: "Захист дисертації:\n- Науковий ступінь: \n- Спеціальність: \n- Тема дисертації: \n- Заклад: \n- Рік захисту: \n",
-            6: "Наукове керівництво:\n- ПІБ здобувача: \n- Науковий ступінь: \n- Спеціальність: \n- Тема дисертації: \n- Рік захисту: \n",
-            13: "Викладання іноземною мовою:\n- Назва дисципліни: \n- Мова викладання: \n- Кількість годин: \n- Навчальний рік: \n",
-            20: "Практичний досвід:\n- Посада: \n- Організація: \n- Період роботи: \n- Основні обов'язки: \n"
-        };
-        
-        return templates[groupNumber] || `Досягнення групи ${groupNumber}:\n1. `;
-    }
-
-    /**
-     * Перевірка на обов'язкові поля для певних груп
-     */
-    static getRequiredFields(groupNumber) {
-        const requiredFields = {
-            5: ['науковий ступінь', 'спеціальність', 'рік захисту'],
-            6: ['ПІБ здобувача', 'науковий ступінь', 'рік захисту'],
-            13: ['назва дисципліни', 'мова викладання', 'кількість годин'],
-            20: ['посада', 'організація', 'період роботи']
-        };
-        
-        return requiredFields[groupNumber] || [];
-    }
-
-    /**
-     * Валідація специфічних груп достижень
-     */
-    static validateSpecificGroup(groupNumber, text) {
-        const errors = [];
-        
-        if (!text || !text.trim()) {
-            return errors; // Пустые поля разрешены
-        }
-        
-        const requiredFields = this.getRequiredFields(groupNumber);
-        const lowerText = text.toLowerCase();
-        
-        requiredFields.forEach(field => {
-            if (!lowerText.includes(field.toLowerCase())) {
-                errors.push(`Відсутня обов'язкова інформація: ${field}`);
-            }
-        });
-        
-        // Специфические проверки
-        switch (groupNumber) {
-            case 5: // Захист дисертації
-                if (!lowerText.match(/\d{4}/)) {
-                    errors.push('Необхідно вказати рік захисту');
-                }
-                break;
-                
-            case 13: // Викладання іноземною мовою
-                if (!lowerText.match(/\d+.*год/)) {
-                    errors.push('Необхідно вказати кількість годин');
-                }
-                break;
-                
-            case 20: // Практичний досвід
-                const years = lowerText.match(/(\d+).*рок|(\d+).*год/);
-                if (!years || parseInt(years[1] || years[2]) < 5) {
-                    errors.push('Досвід роботи повинен становити не менше 5 років');
-                }
-                break;
-        }
-        
-        return errors;
     }
 }
 
@@ -918,120 +605,8 @@ class ExportSettingsHelper {
                 }
             }
         } catch (error) {
-            console.error('[ExportSettings] Ошибка загрузки настроек:', error);
+            // Игнорируем ошибки загрузки настроек
         }
-    }
-}
-
-/**
- * Валидатор формы достижений
- */
-class AchievementsValidator {
-    constructor() {
-        this.validationRules = new Map();
-        this.setupDefaultRules();
-    }
-
-    setupDefaultRules() {
-        // Общие правила для всех групп
-        this.addRule('all', (text) => {
-            const errors = [];
-            
-            if (text && text.length > 5000) {
-                errors.push('Текст занадто довгий (максимум 5000 символів)');
-            }
-            
-            return errors;
-        });
-
-        // Специфические правила для отдельных групп
-        this.addRule('group_1', (text) => {
-            const errors = [];
-            
-            if (text && text.trim()) {
-                const publicationPattern = /публікаці|статт|журнал|scopus|web of science/i;
-                if (!publicationPattern.test(text)) {
-                    errors.push('Схоже, що текст не стосується публікацій у наукових виданнях');
-                }
-            }
-            
-            return errors;
-        });
-
-        this.addRule('group_2', (text) => {
-            const errors = [];
-            
-            if (text && text.trim()) {
-                const patentPattern = /патент|авторськ|свідоцтв|винахід|корисн.*модел/i;
-                if (!patentPattern.test(text)) {
-                    errors.push('Схоже, що текст не стосується патентів або авторських прав');
-                }
-            }
-            
-            return errors;
-        });
-    }
-
-    addRule(groupId, validatorFunction) {
-        this.validationRules.set(groupId, validatorFunction);
-    }
-
-    validateGroup(groupNumber, text) {
-        const errors = [];
-        
-        // Применяем общие правила
-        const generalRule = this.validationRules.get('all');
-        if (generalRule) {
-            errors.push(...generalRule(text));
-        }
-        
-        // Применяем специфические правила
-        const specificRule = this.validationRules.get(`group_${groupNumber}`);
-        if (specificRule) {
-            errors.push(...specificRule(text));
-        }
-        
-        // Добавляем проверки из утилит
-        errors.push(...AchievementsUtils.validateSpecificGroup(groupNumber, text));
-        
-        return errors;
-    }
-
-    validateAllGroups(achievements) {
-        const allErrors = {};
-        
-        for (let i = 1; i <= 20; i++) {
-            const text = achievements[`achievement_${i}`];
-            const errors = this.validateGroup(i, text);
-            
-            if (errors.length > 0) {
-                allErrors[`achievement_${i}`] = errors;
-            }
-        }
-        
-        return allErrors;
-    }
-
-    showValidationErrors(errors) {
-        // Очищаем предыдущие ошибки
-        document.querySelectorAll('.field-error').forEach(el => el.remove());
-        document.querySelectorAll('.achievement-textarea.error').forEach(el => {
-            el.classList.remove('error');
-        });
-
-        // Показываем новые ошибки
-        Object.entries(errors).forEach(([field, fieldErrors]) => {
-            const textarea = document.querySelector(`textarea[name="${field}"]`);
-            if (textarea) {
-                textarea.classList.add('error');
-                
-                const errorDiv = document.createElement('div');
-                errorDiv.className = 'field-error';
-                errorDiv.innerHTML = fieldErrors.map(error => `• ${error}`).join('<br>');
-                
-                textarea.parentNode.appendChild(errorDiv);
-            }
-        });
     }
 }
 
@@ -1043,6 +618,4 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Создаем глобальные экземпляры
 window.achievements = new AchievementsManager();
-window.AchievementsUtils = AchievementsUtils;
 window.ExportSettingsHelper = ExportSettingsHelper;
-window.AchievementsValidator = AchievementsValidator;

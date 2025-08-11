@@ -1,16 +1,16 @@
 <?php
-// config/database.php - Обновленный класс для работы с базой данных
-
-require_once __DIR__ . '/config.php';
+// config/database.php - Объединенный класс для конфигурации и работы с базой данных
 
 if (!class_exists('Database')) {
     class Database {
         private static $instance = null;
         private $connection;
-        private $config;
+        private $config = [];
+        private $envLoaded = false;
         
         private function __construct() {
-            $this->config = Config::getInstance();
+            $this->loadEnvironment();
+            $this->loadDefaultConfig();
             $this->connect();
         }
         
@@ -22,30 +22,101 @@ if (!class_exists('Database')) {
         }
         
         /**
+         * Загрузка переменных окружения из .env файла
+         */
+        private function loadEnvironment() {
+            $envFile = __DIR__ . '/../.env';
+            
+            if (!file_exists($envFile)) {
+                error_log('Warning: .env file not found. Using default configuration.');
+                return;
+            }
+            
+            $lines = file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+            
+            foreach ($lines as $line) {
+                $line = trim($line);
+                
+                // Пропускаем комментарии
+                if (strpos($line, '#') === 0) {
+                    continue;
+                }
+                
+                // Парсим переменные
+                if (strpos($line, '=') !== false) {
+                    list($key, $value) = explode('=', $line, 2);
+                    $key = trim($key);
+                    $value = trim($value);
+                    
+                    // Убираем кавычки если есть
+                    if (preg_match('/^(["\']).*\1$/', $value)) {
+                        $value = substr($value, 1, -1);
+                    }
+                    
+                    $this->config[$key] = $value;
+                    
+                    // Устанавливаем в $_ENV если не установлено
+                    if (!isset($_ENV[$key])) {
+                        $_ENV[$key] = $value;
+                    }
+                }
+            }
+            
+            $this->envLoaded = true;
+        }
+        
+        /**
+         * Загрузка конфигурации по умолчанию
+         */
+        private function loadDefaultConfig() {
+            $defaults = [
+                'DB_HOST' => 'localhost',
+                'DB_NAME' => 'kalinsky_edebo_system',
+                'DB_USER' => 'root',
+                'DB_PASS' => '',
+                'DB_CHARSET' => 'utf8mb4',
+                'APP_ENV' => 'production',
+                'APP_DEBUG' => 'false',
+                'SESSION_LIFETIME' => '86400',
+                'MAX_FILE_SIZE' => '10485760',
+                'LOG_LEVEL' => 'error'
+            ];
+            
+            foreach ($defaults as $key => $value) {
+                if (!isset($this->config[$key])) {
+                    $this->config[$key] = $value;
+                }
+            }
+        }
+        
+        /**
          * Установка соединения с базой данных
          */
         private function connect() {
-            $dbConfig = $this->config->getDatabaseConfig();
-            
-            $dsn = "mysql:host={$dbConfig['host']};dbname={$dbConfig['database']};charset={$dbConfig['charset']}";
+            $dsn = sprintf(
+                "mysql:host=%s;dbname=%s;charset=%s",
+                $this->config['DB_HOST'],
+                $this->config['DB_NAME'],
+                $this->config['DB_CHARSET']
+            );
             
             $options = [
                 PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
                 PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
                 PDO::ATTR_EMULATE_PREPARES => false,
-                PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES {$dbConfig['charset']}"
+                PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES {$this->config['DB_CHARSET']}"
             ];
             
             try {
-                $this->connection = new PDO($dsn, $dbConfig['username'], $dbConfig['password'], $options);
+                $this->connection = new PDO($dsn, $this->config['DB_USER'], $this->config['DB_PASS'], $options);
                 
                 // Логируем успешное подключение в режиме отладки
-                if ($this->config->isDebug()) {
-                    error_log("Database connection established successfully");
+                if ($this->isDebug()) {
+                    $this->writeLog("Database connection established successfully");
                 }
                 
             } catch (PDOException $e) {
-                $this->logDatabaseError("Database connection failed", $e);
+                $this->writeLog("Database connection failed: " . $e->getMessage(), 'error');
                 throw new PDOException("Database connection failed: " . $e->getMessage(), (int)$e->getCode());
             }
         }
@@ -70,6 +141,20 @@ if (!class_exists('Database')) {
         }
         
         /**
+         * Получение значения конфигурации
+         */
+        public function get($key, $default = null) {
+            return $this->config[$key] ?? $default;
+        }
+        
+        /**
+         * Проверка режима отладки
+         */
+        public function isDebug() {
+            return strtolower($this->get('APP_DEBUG')) === 'true';
+        }
+        
+        /**
          * Проверка доступности базы данных
          */
         public function isConnected() {
@@ -90,12 +175,12 @@ if (!class_exists('Database')) {
                 
                 return [
                     'version' => $result['version'],
-                    'host' => $this->config->get('DB_HOST'),
-                    'database' => $this->config->get('DB_NAME'),
-                    'charset' => $this->config->get('DB_CHARSET')
+                    'host' => $this->get('DB_HOST'),
+                    'database' => $this->get('DB_NAME'),
+                    'charset' => $this->get('DB_CHARSET')
                 ];
             } catch (PDOException $e) {
-                $this->logDatabaseError("Failed to get database info", $e);
+                $this->writeLog("Failed to get database info: " . $e->getMessage(), 'error');
                 return null;
             }
         }
@@ -117,24 +202,22 @@ if (!class_exists('Database')) {
         }
         
         /**
-         * Логирование ошибок базы данных
+         * Унифицированное логирование
          */
-        private function logDatabaseError($message, PDOException $e) {
+        public function writeLog($message, $level = 'info') {
             $logMessage = sprintf(
-                "[%s] %s: %s (Error Code: %s)",
+                "[%s] [%s] %s",
                 date('Y-m-d H:i:s'),
-                $message,
-                $e->getMessage(),
-                $e->getCode()
+                strtoupper($level),
+                $message
             );
             
-            $logFile = $this->config->get('LOG_FILE', '../logs/database.log');
-            $logDir = dirname($logFile);
-            
+            $logDir = '../logs';
             if (!is_dir($logDir)) {
                 @mkdir($logDir, 0755, true);
             }
             
+            $logFile = $logDir . '/app.log';
             error_log($logMessage . "\n", 3, $logFile);
         }
         
@@ -157,6 +240,13 @@ if (!class_exists('Database')) {
         public function __destruct() {
             $this->disconnect();
         }
+    }
+}
+
+// Глобальная функция для логирования (для обратной совместимости)
+if (!function_exists('writeErrorLog')) {
+    function writeErrorLog($message) {
+        Database::getInstance()->writeLog($message, 'error');
     }
 }
 ?>

@@ -86,8 +86,6 @@ class ApiClient {
                 }
             }
 
-            console.log(`[API] ${config.method} ${url}`, options.body);
-
             const response = await fetch(url, config);
             
             clearTimeout(loadingTimeout);
@@ -121,7 +119,6 @@ class ApiClient {
                     throw new ApiError(data.error || 'Ошибка API', response.status, data);
                 }
                 
-                console.log(`[API] Response:`, data);
                 return data;
             } else {
                 // Для файлов и других типов контента
@@ -146,7 +143,6 @@ class ApiClient {
                 throw new ApiError('Ошибка сети. Проверьте соединение.', 0);
             }
             
-            console.error(`[API] Error:`, error);
             throw new ApiError('Неизвестная ошибка', 0, error);
         }
     }
