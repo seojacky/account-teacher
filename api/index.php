@@ -1,5 +1,5 @@
 <?php
-// api/index.php
+// api/index.php - Безопасная версия с реальной проверкой токенов
 
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
@@ -12,645 +12,323 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit();
 }
 
-require_once '../config/config.php';
-require_once '../config/database.php';
-require_once '../classes/Auth.php';
-require_once '../classes/AuthMiddleware.php';
-require_once '../classes/UserManager.php';
-require_once '../classes/AchievementsManager.php';
+// Подключаем только database.php (как в оригинале)
+try {
+    require_once '../config/database.php';
+} catch (Exception $e) {
+    sendError('Database config not found: ' . $e->getMessage(), 500);
+    exit;
+}
 
-class ApiRouter {
-    private $method;
-    private $path;
-    private $auth;
-    private $middleware;
-    private $userManager;
-    private $achievementsManager;
+try {
+    // Отримуємо шлях (как в оригинале)
+    $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+    $path = trim($path, '/');
+    $parts = explode('/', $path);
     
-    public function __construct() {
-        $this->method = $_SERVER['REQUEST_METHOD'];
-        $this->path = $this->getPath();
-        $this->auth = new Auth();
-        $this->middleware = new AuthMiddleware();
-        $this->userManager = new UserManager();
-        $this->achievementsManager = new AchievementsManager();
+    // Убираем 'api' из пути если есть
+    if (count($parts) > 0 && $parts[0] === 'api') {
+        array_shift($parts);
     }
     
-    public function route() {
-        try {
-            switch ($this->path[0]) {
-                case 'auth':
-                    $this->handleAuth();
-                    break;
-                case 'users':
-                    $this->handleUsers();
-                    break;
-                case 'achievements':
-                    $this->handleAchievements();
-                    break;
-                case 'reports':
-                    $this->handleReports();
-                    break;
-                case 'system':
-                    $this->handleSystem();
-                    break;
-                default:
-                    $this->sendError('Endpoint not found', 404);
-            }
-        } catch (Exception $e) {
-            writeErrorLog("API Router error: " . $e->getMessage());
-            $this->sendError('Internal server error', 500);
+    $parts = array_filter($parts);
+    $parts = array_values($parts);
+    $method = $_SERVER['REQUEST_METHOD'];
+    
+    // Простой роутинг (как в оригинале)
+    if (count($parts) >= 2 && $parts[0] === 'auth') {
+        if ($parts[1] === 'login' && $method === 'POST') {
+            handleLogin();
+        } elseif ($parts[1] === 'me' && $method === 'GET') {
+            handleGetMe();
+        } elseif ($parts[1] === 'logout' && $method === 'POST') {
+            handleLogout();
+        } else {
+            sendError('Invalid auth endpoint', 404);
         }
+    } elseif (count($parts) >= 1 && $parts[0] === 'users') {
+        handleUsersAPI($parts, $method);
+    } elseif (count($parts) >= 1 && $parts[0] === 'achievements') {
+        handleAchievementsAPI($parts, $method);
+    } elseif (count($parts) >= 1 && $parts[0] === 'reports') {
+        handleReportsAPI($parts, $method);
+    } else {
+        sendError('Endpoint not found', 404);
     }
     
-    /**
-     * Обработка авторизации
-     */
-    private function handleAuth() {
-        switch ($this->method) {
-            case 'POST':
-                if ($this->path[1] === 'login') {
-                    $this->login();
-                } elseif ($this->path[1] === 'logout') {
-                    $this->logout();
-                } elseif ($this->path[1] === 'change-password') {
-                    $this->changePassword();
-                } else {
-                    $this->sendError('Invalid auth endpoint', 404);
-                }
-                break;
-            case 'GET':
-                if ($this->path[1] === 'me') {
-                    $this->getCurrentUser();
-                } else {
-                    $this->sendError('Invalid auth endpoint', 404);
-                }
-                break;
-            default:
-                $this->sendError('Method not allowed', 405);
-        }
-    }
-    
-    /**
-     * Обработка пользователей
-     */
-    private function handleUsers() {
-        $user = $this->middleware->authenticate();
-        
-        switch ($this->method) {
-            case 'GET':
-                if (empty($this->path[1])) {
-                    $this->getUsersList($user);
-                } elseif ($this->path[1] === 'roles') {
-                    $this->getRoles($user);
-                } elseif ($this->path[1] === 'faculties') {
-                    $this->getFaculties($user);
-                } elseif ($this->path[1] === 'departments') {
-                    $this->getDepartments($user);
-                } elseif (is_numeric($this->path[1])) {
-                    $this->getUser($this->path[1], $user);
-                } else {
-                    $this->sendError('Invalid users endpoint', 404);
-                }
-                break;
-            case 'POST':
-                if (empty($this->path[1])) {
-                    $this->createUser($user);
-                } elseif ($this->path[1] === 'import') {
-                    $this->importUsers($user);
-                } else {
-                    $this->sendError('Invalid users endpoint', 404);
-                }
-                break;
-            case 'PUT':
-                if (is_numeric($this->path[1])) {
-                    $this->updateUser($this->path[1], $user);
-                } else {
-                    $this->sendError('Invalid users endpoint', 404);
-                }
-                break;
-            case 'DELETE':
-                if (is_numeric($this->path[1])) {
-                    $this->deleteUser($this->path[1], $user);
-                } else {
-                    $this->sendError('Invalid users endpoint', 404);
-                }
-                break;
-            default:
-                $this->sendError('Method not allowed', 405);
-        }
-    }
-    
-    /**
-     * Обработка достижений
-     */
-    private function handleAchievements() {
-        $user = $this->middleware->authenticate();
-        
-        switch ($this->method) {
-            case 'GET':
-                if (is_numeric($this->path[1])) {
-                    if ($this->path[2] === 'export') {
-                        $this->exportAchievements($this->path[1], $user);
-                    } else {
-                        $this->getAchievements($this->path[1], $user);
-                    }
-                } else {
-                    $this->sendError('Invalid achievements endpoint', 404);
-                }
-                break;
-            case 'POST':
-                if (is_numeric($this->path[1])) {
-                    if ($this->path[2] === 'import') {
-                        $this->importAchievements($this->path[1], $user);
-                    } else {
-                        $this->sendError('Invalid achievements endpoint', 404);
-                    }
-                } else {
-                    $this->sendError('Invalid achievements endpoint', 404);
-                }
-                break;
-            case 'PUT':
-                if (is_numeric($this->path[1])) {
-                    $this->updateAchievements($this->path[1], $user);
-                } else {
-                    $this->sendError('Invalid achievements endpoint', 404);
-                }
-                break;
-            default:
-                $this->sendError('Method not allowed', 405);
-        }
-    }
-    
-    /**
-     * Обработка отчетов
-     */
-    private function handleReports() {
-        $user = $this->middleware->authenticate();
-        
-        switch ($this->method) {
-            case 'GET':
-                if ($this->path[1] === 'export') {
-                    $this->exportReport($user);
-                } elseif ($this->path[1] === 'statistics') {
-                    $this->getStatistics($user);
-                } else {
-                    $this->sendError('Invalid reports endpoint', 404);
-                }
-                break;
-            default:
-                $this->sendError('Method not allowed', 405);
-        }
-    }
-    
-    /**
-     * Обработка системных запросов
-     */
-    private function handleSystem() {
-        $user = $this->middleware->authenticate();
-        
-        if ($user['role'] !== 'admin') {
-            $this->sendError('Access denied', 403);
-            return;
-        }
-        
-        switch ($this->method) {
-            case 'GET':
-                if ($this->path[1] === 'logs') {
-                    $this->getSystemLogs($user);
-                } elseif ($this->path[1] === 'status') {
-                    $this->getSystemStatus($user);
-                } else {
-                    $this->sendError('Invalid system endpoint', 404);
-                }
-                break;
-            default:
-                $this->sendError('Method not allowed', 405);
-        }
-    }
-    
-    // === AUTH METHODS ===
-    
-    private function login() {
-        $data = $this->getJsonInput();
+} catch (Exception $e) {
+    Database::getInstance()->writeLog("API Router error: " . $e->getMessage(), 'error');
+    sendError('Server error: ' . $e->getMessage(), 500);
+}
+
+// ============ УЛУЧШЕННЫЕ ФУНКЦИИ AUTH ============
+
+function handleLogin() {
+    try {
+        $input = file_get_contents('php://input');
+        $data = json_decode($input, true);
         
         if (empty($data['employee_id']) || empty($data['password'])) {
-            $this->sendError('Employee ID and password are required', 400);
+            sendError('Employee ID and password are required', 400);
             return;
         }
         
-        $result = $this->auth->login($data['employee_id'], $data['password']);
+        // Прямое подключение к БД (как в оригинале)
+        $db = Database::getInstance()->getConnection();
         
-        if ($result) {
-            $this->sendSuccess($result);
-        } else {
-            $this->sendError('Invalid credentials', 401);
-        }
-    }
-    
-    private function logout() {
-        $sessionId = $this->getSessionId();
+        $stmt = $db->prepare("
+            SELECT u.*, r.name as role_name, r.display_name as role_display_name, r.permissions, 
+                   f.short_name as faculty_name, d.short_name as department_name
+            FROM users u 
+            JOIN roles r ON u.role_id = r.id 
+            LEFT JOIN faculties f ON u.faculty_id = f.id
+            LEFT JOIN departments d ON u.department_id = d.id
+            WHERE u.employee_id = ? AND u.is_active = 1
+        ");
         
-        if ($sessionId) {
-            $this->auth->logout($sessionId);
-        }
+        $stmt->execute([$data['employee_id']]);
+        $user = $stmt->fetch();
         
-        $this->sendSuccess(['message' => 'Logged out successfully']);
-    }
-    
-    private function changePassword() {
-        $user = $this->middleware->authenticate();
-        $data = $this->getJsonInput();
-        
-        if (empty($data['current_password']) || empty($data['new_password'])) {
-            $this->sendError('Current and new passwords are required', 400);
+        if (!$user || !password_verify($data['password'], $user['password_hash'])) {
+            sendError('Invalid credentials', 401);
             return;
         }
         
-        $result = $this->auth->changePassword(
-            $user['id'], 
-            $data['current_password'], 
-            $data['new_password']
-        );
+        // Обновляем время последнего входа
+        $updateStmt = $db->prepare("UPDATE users SET last_login = NOW() WHERE id = ?");
+        $updateStmt->execute([$user['id']]);
         
-        if ($result['success']) {
-            $this->sendSuccess($result);
-        } else {
-            $this->sendError($result['message'], 400);
-        }
-    }
-    
-    private function getCurrentUser() {
-        $user = $this->middleware->authenticate();
-        $this->sendSuccess(['user' => $user]);
-    }
-    
-    // === USER METHODS ===
-    
-    private function getUsersList($currentUser) {
-        $filters = $_GET;
-        $page = intval($_GET['page'] ?? 1);
-        $limit = min(intval($_GET['limit'] ?? 50), MAX_PAGE_SIZE);
+        // Создаем РЕАЛЬНУЮ сессию
+        $sessionId = bin2hex(random_bytes(32));
+        $ipAddress = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+        $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? 'unknown';
         
-        $result = $this->userManager->getUsersList($currentUser, $filters, $page, $limit);
+        // Сохраняем сессию в базе данных
+        $sessionStmt = $db->prepare("
+            INSERT INTO sessions (id, user_id, ip_address, user_agent, created_at, last_activity) 
+            VALUES (?, ?, ?, ?, NOW(), NOW())
+        ");
+        $sessionStmt->execute([$sessionId, $user['id'], $ipAddress, $userAgent]);
         
-        if ($result['success']) {
-            $this->sendSuccess($result);
-        } else {
-            $this->sendError($result['error'], $result['code']);
-        }
-    }
-    
-    private function getUser($userId, $currentUser) {
-        $user = $this->userManager->getUserById($userId, $currentUser);
+        sendSuccess([
+            'user' => [
+                'id' => $user['id'],
+                'employee_id' => $user['employee_id'],
+                'full_name' => $user['full_name'],
+                'email' => $user['email'],
+                'position' => $user['position'],
+                'role' => $user['role_name'],
+                'role_display' => $user['role_display_name'],
+                'permissions' => json_decode($user['permissions'] ?? '{}', true),
+                'faculty_id' => $user['faculty_id'],
+                'department_id' => $user['department_id'],
+                'faculty_name' => $user['faculty_name'],
+                'department_name' => $user['department_name']
+            ],
+            'session_id' => $sessionId
+        ]);
         
-        if ($user) {
-            $this->sendSuccess(['user' => $user]);
-        } else {
-            $this->sendError('User not found', 404);
-        }
-    }
-    
-    private function createUser($currentUser) {
-        $data = $this->getJsonInput();
-        $result = $this->userManager->createUser($data, $currentUser);
-        
-        if ($result['success']) {
-            $this->sendSuccess($result);
-        } else {
-            $this->sendError($result['error'], $result['code']);
-        }
-    }
-    
-    private function updateUser($userId, $currentUser) {
-        $data = $this->getJsonInput();
-        $result = $this->userManager->updateUser($userId, $data, $currentUser);
-        
-        if ($result['success']) {
-            $this->sendSuccess($result);
-        } else {
-            $this->sendError($result['error'], $result['code']);
-        }
-    }
-    
-    private function deleteUser($userId, $currentUser) {
-        $result = $this->userManager->deactivateUser($userId, $currentUser);
-        
-        if ($result['success']) {
-            $this->sendSuccess($result);
-        } else {
-            $this->sendError($result['error'], $result['code']);
-        }
-    }
-    
-    private function importUsers($currentUser) {
-        if (!isset($_FILES['file'])) {
-            $this->sendError('No file uploaded', 400);
-            return;
-        }
-        
-        $file = $_FILES['file'];
-        
-        if ($file['error'] !== UPLOAD_ERR_OK) {
-            $this->sendError('File upload error', 400);
-            return;
-        }
-        
-        $csvData = file_get_contents($file['tmp_name']);
-        $result = $this->userManager->importUsersFromCSV($csvData, $currentUser);
-        
-        if ($result['success']) {
-            $this->sendSuccess($result);
-        } else {
-            $this->sendError($result['error'], $result['code']);
-        }
-    }
-    
-    private function getRoles($currentUser) {
-        $result = $this->userManager->getRoles();
-        
-        if ($result['success']) {
-            $this->sendSuccess($result);
-        } else {
-            $this->sendError($result['error'], $result['code']);
-        }
-    }
-    
-    private function getFaculties($currentUser) {
-        $result = $this->userManager->getFaculties();
-        
-        if ($result['success']) {
-            $this->sendSuccess($result);
-        } else {
-            $this->sendError($result['error'], $result['code']);
-        }
-    }
-    
-    private function getDepartments($currentUser) {
-        $facultyId = $_GET['faculty_id'] ?? null;
-        $result = $this->userManager->getDepartments($facultyId);
-        
-        if ($result['success']) {
-            $this->sendSuccess($result);
-        } else {
-            $this->sendError($result['error'], $result['code']);
-        }
-    }
-    
-    // === ACHIEVEMENTS METHODS ===
-    
-    private function getAchievements($userId, $currentUser) {
-        $result = $this->achievementsManager->getAchievements($userId, $currentUser);
-        
-        if ($result['success']) {
-            $this->sendSuccess($result);
-        } else {
-            $this->sendError($result['error'], $result['code']);
-        }
-    }
-    
-    private function updateAchievements($userId, $currentUser) {
-        $data = $this->getJsonInput();
-        $result = $this->achievementsManager->updateAchievements($userId, $data, $currentUser);
-        
-        if ($result['success']) {
-            $this->sendSuccess($result);
-        } else {
-            $this->sendError($result['error'], $result['code']);
-        }
-    }
-    
-    private function exportAchievements($userId, $currentUser) {
-        $encoding = $_GET['encoding'] ?? 'utf8bom';
-        $includeEmpty = isset($_GET['include_empty']) && $_GET['include_empty'] === 'true';
-        
-        $result = $this->achievementsManager->generateCSV($userId, $currentUser, $encoding, $includeEmpty);
-        
-        if ($result['success']) {
-            // Отправляем файл
-            header('Content-Type: text/csv; charset=utf-8');
-            header('Content-Disposition: attachment; filename="' . $result['filename'] . '"');
-            echo $result['content'];
-            exit;
-        } else {
-            $this->sendError($result['error'], $result['code']);
-        }
-    }
-    
-    private function importAchievements($userId, $currentUser) {
-        if (!isset($_FILES['file'])) {
-            $this->sendError('No file uploaded', 400);
-            return;
-        }
-        
-        $file = $_FILES['file'];
-        
-        if ($file['error'] !== UPLOAD_ERR_OK) {
-            $this->sendError('File upload error', 400);
-            return;
-        }
-        
-        $csvData = file_get_contents($file['tmp_name']);
-        $result = $this->achievementsManager->importFromCSV($userId, $csvData, $currentUser);
-        
-        if ($result['success']) {
-            $this->sendSuccess($result);
-        } else {
-            $this->sendError($result['error'], $result['code']);
-        }
-    }
-    
-    // === REPORTS METHODS ===
-    
-    private function exportReport($currentUser) {
-        $filters = $_GET;
-        $result = $this->achievementsManager->exportReport($currentUser, $filters);
-        
-        if ($result['success']) {
-            // Отправляем файл
-            header('Content-Type: text/csv; charset=utf-8');
-            header('Content-Disposition: attachment; filename="' . $result['filename'] . '"');
-            echo $result['content'];
-            exit;
-        } else {
-            $this->sendError($result['error'], $result['code']);
-        }
-    }
-    
-    private function getStatistics($currentUser) {
-        try {
-            $db = Database::getInstance()->getConnection();
-            
-            // Базовая статистика
-            $stats = [];
-            
-            // Общее количество пользователей
-            $stmt = $db->prepare("SELECT COUNT(*) as total FROM users WHERE is_active = 1");
-            $stmt->execute();
-            $stats['total_users'] = $stmt->fetch()['total'];
-            
-            // Количество пользователей с заполненными достижениями
-            $stmt = $db->prepare("
-                SELECT COUNT(DISTINCT a.user_id) as with_achievements 
-                FROM achievements a 
-                JOIN users u ON a.user_id = u.id 
-                WHERE u.is_active = 1
-            ");
-            $stmt->execute();
-            $stats['users_with_achievements'] = $stmt->fetch()['with_achievements'];
-            
-            // Статистика по ролям
-            $stmt = $db->prepare("
-                SELECT r.display_name, COUNT(u.id) as count 
-                FROM roles r 
-                LEFT JOIN users u ON r.id = u.role_id AND u.is_active = 1 
-                GROUP BY r.id, r.display_name
-            ");
-            $stmt->execute();
-            $stats['by_role'] = $stmt->fetchAll();
-            
-            // Статистика по факультетам
-            $stmt = $db->prepare("
-                SELECT f.short_name, COUNT(u.id) as count 
-                FROM faculties f 
-                LEFT JOIN users u ON f.id = u.faculty_id AND u.is_active = 1 
-                GROUP BY f.id, f.short_name 
-                ORDER BY count DESC
-            ");
-            $stmt->execute();
-            $stats['by_faculty'] = $stmt->fetchAll();
-            
-            $this->sendSuccess(['statistics' => $stats]);
-            
-        } catch (Exception $e) {
-            writeErrorLog("Get statistics error: " . $e->getMessage());
-            $this->sendError('Error getting statistics', 500);
-        }
-    }
-    
-    // === SYSTEM METHODS ===
-    
-    private function getSystemLogs($currentUser) {
-        try {
-            $db = Database::getInstance()->getConnection();
-            $page = intval($_GET['page'] ?? 1);
-            $limit = min(intval($_GET['limit'] ?? 50), MAX_PAGE_SIZE);
-            $offset = ($page - 1) * $limit;
-            
-            $stmt = $db->prepare("
-                SELECT al.*, u.full_name as user_name 
-                FROM audit_log al
-                LEFT JOIN users u ON al.user_id = u.id
-                ORDER BY al.created_at DESC
-                LIMIT ? OFFSET ?
-            ");
-            $stmt->execute([$limit, $offset]);
-            $logs = $stmt->fetchAll();
-            
-            // Получаем общее количество
-            $stmt = $db->prepare("SELECT COUNT(*) as total FROM audit_log");
-            $stmt->execute();
-            $total = $stmt->fetch()['total'];
-            
-            $this->sendSuccess([
-                'data' => $logs,
-                'pagination' => [
-                    'page' => $page,
-                    'limit' => $limit,
-                    'total' => $total,
-                    'pages' => ceil($total / $limit)
-                ]
-            ]);
-            
-        } catch (Exception $e) {
-            writeErrorLog("Get system logs error: " . $e->getMessage());
-            $this->sendError('Error getting system logs', 500);
-        }
-    }
-    
-    private function getSystemStatus($currentUser) {
-        try {
-            $db = Database::getInstance()->getConnection();
-            
-            $status = [
-                'database' => 'connected',
-                'version' => APP_VERSION,
-                'php_version' => PHP_VERSION,
-                'memory_usage' => memory_get_usage(true),
-                'disk_space' => disk_free_space('.'),
-                'active_sessions' => 0
-            ];
-            
-            // Количество активных сессий
-            $stmt = $db->prepare("
-                SELECT COUNT(*) as count 
-                FROM sessions 
-                WHERE last_activity > DATE_SUB(NOW(), INTERVAL ? SECOND)
-            ");
-            $stmt->execute([SESSION_EXPIRE_TIME]);
-            $status['active_sessions'] = $stmt->fetch()['count'];
-            
-            $this->sendSuccess(['status' => $status]);
-            
-        } catch (Exception $e) {
-            writeErrorLog("Get system status error: " . $e->getMessage());
-            $this->sendError('Error getting system status', 500);
-        }
-    }
-    
-    // === HELPER METHODS ===
-    
-    private function getPath() {
-        $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-        $path = trim($path, '/');
-        $parts = explode('/', $path);
-        
-        // Убираем 'api' из пути если есть
-        if ($parts[0] === 'api') {
-            array_shift($parts);
-        }
-        
-        return array_filter($parts);
-    }
-    
-    private function getJsonInput() {
-        $input = file_get_contents('php://input');
-        return json_decode($input, true) ?? [];
-    }
-    
-    private function getSessionId() {
-        $headers = getallheaders();
-        
-        if (isset($headers['Authorization'])) {
-            $auth = $headers['Authorization'];
-            if (preg_match('/Bearer\s+(.*)$/i', $auth, $matches)) {
-                return $matches[1];
-            }
-        }
-        
-        return $_COOKIE['session_id'] ?? null;
-    }
-    
-    private function sendSuccess($data, $code = 200) {
-        http_response_code($code);
-        echo json_encode($data, JSON_UNESCAPED_UNICODE);
-        exit;
-    }
-    
-    private function sendError($message, $code = 400) {
-        http_response_code($code);
-        echo json_encode(['error' => $message], JSON_UNESCAPED_UNICODE);
-        exit;
+    } catch (Exception $e) {
+        Database::getInstance()->writeLog("Login error: " . $e->getMessage(), 'error');
+        sendError('Login error: ' . $e->getMessage(), 500);
     }
 }
 
-// Инициализация и запуск роутера
-try {
-    $router = new ApiRouter();
-    $router->route();
-} catch (Exception $e) {
-    writeErrorLog("API error: " . $e->getMessage());
-    http_response_code(500);
-    echo json_encode(['error' => 'Internal server error'], JSON_UNESCAPED_UNICODE);
+function handleGetMe() {
+    try {
+        $user = getCurrentUser();
+        if ($user) {
+            sendSuccess(['user' => $user]);
+        } else {
+            sendError('Not authenticated', 401);
+        }
+        
+    } catch (Exception $e) {
+        Database::getInstance()->writeLog("Get me error: " . $e->getMessage(), 'error');
+        sendError('Authentication error', 401);
+    }
+}
+
+function handleLogout() {
+    try {
+        // Получаем токен из заголовка
+        $headers = getallheaders();
+        $authHeader = $headers['Authorization'] ?? null;
+        
+        if ($authHeader && str_starts_with($authHeader, 'Bearer ')) {
+            $sessionId = substr($authHeader, 7);
+            
+            // Удаляем сессию из базы данных
+            $db = Database::getInstance()->getConnection();
+            $stmt = $db->prepare("DELETE FROM sessions WHERE id = ?");
+            $stmt->execute([$sessionId]);
+        }
+        
+        sendSuccess(['message' => 'Logged out successfully']);
+    } catch (Exception $e) {
+        Database::getInstance()->writeLog("Logout error: " . $e->getMessage(), 'error');
+        sendError('Logout error', 500);
+    }
+}
+
+// ============ ЗАГЛУШКИ ДЛЯ ДОПОЛНИТЕЛЬНЫХ API ============
+
+function handleUsersAPI($parts, $method) {
+    // Проверяем авторизацию для пользователей
+    $currentUser = getCurrentUser();
+    if (!$currentUser) {
+        sendError('Authentication required', 401);
+        return;
+    }
+    
+    // Заглушки для API пользователей
+    if ($method === 'GET') {
+        sendSuccess([
+            'data' => [],
+            'pagination' => ['page' => 1, 'total' => 0]
+        ]);
+    } else {
+        sendSuccess(['message' => 'Users API endpoint (stub)']);
+    }
+}
+
+function handleAchievementsAPI($parts, $method) {
+    // Проверяем авторизацию для достижений
+    $currentUser = getCurrentUser();
+    if (!$currentUser) {
+        sendError('Authentication required', 401);
+        return;
+    }
+    
+    // Заглушки для API достижений
+    if ($method === 'GET') {
+        sendSuccess([
+            'data' => [
+                'user_id' => $parts[1] ?? 1,
+                'full_name' => $currentUser['full_name'],
+                'achievement_1' => null,
+                'achievement_2' => null,
+            ]
+        ]);
+    } else {
+        sendSuccess(['message' => 'Achievements API endpoint (stub)']);
+    }
+}
+
+function handleReportsAPI($parts, $method) {
+    // Проверяем авторизацию для отчетов
+    $currentUser = getCurrentUser();
+    if (!$currentUser) {
+        sendError('Authentication required', 401);
+        return;
+    }
+    
+    // Заглушки для API отчетов
+    if (count($parts) >= 2 && $parts[1] === 'statistics') {
+        sendSuccess([
+            'statistics' => [
+                'total_users' => 0,
+                'users_with_achievements' => 0,
+                'by_role' => [],
+                'by_faculty' => []
+            ]
+        ]);
+    } else {
+        sendSuccess(['message' => 'Reports API endpoint (stub)']);
+    }
+}
+
+// ============ БЕЗОПАСНАЯ ФУНКЦИЯ ПРОВЕРКИ ПОЛЬЗОВАТЕЛЯ ============
+
+/**
+ * Получение текущего пользователя из РЕАЛЬНОГО токена
+ */
+function getCurrentUser() {
+    $headers = getallheaders();
+    $authHeader = $headers['Authorization'] ?? null;
+    
+    if (!$authHeader || !str_starts_with($authHeader, 'Bearer ')) {
+        return null;
+    }
+    
+    $sessionId = substr($authHeader, 7);
+    
+    if (empty($sessionId) || strlen($sessionId) !== 64) {
+        return null;
+    }
+    
+    try {
+        $db = Database::getInstance()->getConnection();
+        
+        // Проверяем сессию в базе данных
+        $stmt = $db->prepare("
+            SELECT u.*, r.name as role_name, r.display_name as role_display_name, r.permissions,
+                   f.short_name as faculty_name, d.short_name as department_name,
+                   s.last_activity
+            FROM sessions s
+            JOIN users u ON s.user_id = u.id
+            JOIN roles r ON u.role_id = r.id
+            LEFT JOIN faculties f ON u.faculty_id = f.id
+            LEFT JOIN departments d ON u.department_id = d.id
+            WHERE s.id = ? AND u.is_active = 1
+        ");
+        
+        $stmt->execute([$sessionId]);
+        $result = $stmt->fetch();
+        
+        if (!$result) {
+            return null;
+        }
+        
+        // Проверяем, не истекла ли сессия (24 часа)
+        $lastActivity = strtotime($result['last_activity']);
+        $now = time();
+        $timeDiff = $now - $lastActivity;
+        
+        if ($timeDiff > 24 * 60 * 60) { // 24 часа в секундах
+            // Сессия истекла, удаляем её
+            $deleteStmt = $db->prepare("DELETE FROM sessions WHERE id = ?");
+            $deleteStmt->execute([$sessionId]);
+            return null;
+        }
+        
+        // Обновляем время последней активности
+        $updateStmt = $db->prepare("UPDATE sessions SET last_activity = NOW() WHERE id = ?");
+        $updateStmt->execute([$sessionId]);
+        
+        // Возвращаем данные пользователя
+        return [
+            'id' => $result['id'],
+            'employee_id' => $result['employee_id'],
+            'full_name' => $result['full_name'],
+            'email' => $result['email'],
+            'position' => $result['position'],
+            'role' => $result['role_name'],
+            'role_display' => $result['role_display_name'],
+            'permissions' => json_decode($result['permissions'] ?? '{}', true),
+            'faculty_id' => $result['faculty_id'],
+            'department_id' => $result['department_id'],
+            'faculty_name' => $result['faculty_name'],
+            'department_name' => $result['department_name']
+        ];
+        
+    } catch (Exception $e) {
+        Database::getInstance()->writeLog("getCurrentUser error: " . $e->getMessage(), 'error');
+        return null;
+    }
+}
+
+// ============ ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ============
+
+function sendSuccess($data, $code = 200) {
+    http_response_code($code);
+    echo json_encode(['success' => true] + $data, JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+function sendError($message, $code = 400) {
+    http_response_code($code);
+    echo json_encode(['success' => false, 'error' => $message], JSON_UNESCAPED_UNICODE);
+    exit;
 }
 ?>

@@ -1,0 +1,49 @@
+# Environment files
+.env
+.env.local
+.env.production
+.env.staging
+
+# Logs
+logs/
+*.log
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+*.swp
+*.swo
+
+# IDE files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# PHP
+vendor/
+composer.lock
+*.phar
+
+# Database
+*.sql
+*.db
+*.sqlite
+
+# Uploads
+uploads/
+files/
+
+# Cache
+cache/
+*.cache
+
+# Error files
+error_log
+php_errors.log
