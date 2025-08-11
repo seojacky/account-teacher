@@ -1,4 +1,4 @@
-// assets/auth.js
+// assets/auth.js - Полная исправленная версия
 
 /**
  * Менеджер авторизации и управления пользователями
@@ -8,6 +8,7 @@ class AuthManager {
         this.currentUser = null;
         this.loginForm = null;
         this.isInitialized = false;
+        this.sessionCheckInterval = null;
         
         // Bind методы для корректного контекста
         this.handleLogin = this.handleLogin.bind(this);
@@ -23,12 +24,17 @@ class AuthManager {
         
         this.setupLoginForm();
         this.setupLogoutHandler();
-        this.setupPasswordChangeHandler();
+        
+        // ОТЛОЖЕННАЯ настройка кнопки смены пароля
+        setTimeout(() => {
+            this.setupPasswordChangeHandler();
+        }, 500);
         
         // Проверяем статус авторизации при загрузке
         await this.checkAuthStatus();
         
         this.isInitialized = true;
+        console.log('[Auth] Менеджер авторизации инициализирован');
     }
 
     /**
@@ -68,18 +74,46 @@ class AuthManager {
     }
 
     /**
-     * Настройка обработчика смены пароля
+     * Настройка обработчика смены пароля - ИСПРАВЛЕННАЯ ВЕРСИЯ
      */
     setupPasswordChangeHandler() {
         const changePasswordBtn = document.getElementById('change-password-btn');
-        const changePasswordForm = document.getElementById('change-password-form');
         
         if (changePasswordBtn) {
-            changePasswordBtn.addEventListener('click', () => {
-                window.modals.show('change-password-modal');
+            console.log('[Auth] Настраиваем обработчик смены пароля');
+            
+            // ПОЛНОСТЬЮ очищаем все обработчики
+            const newBtn = changePasswordBtn.cloneNode(true);
+            changePasswordBtn.parentNode.replaceChild(newBtn, changePasswordBtn);
+            
+            // Добавляем ЕДИНСТВЕННЫЙ обработчик
+            newBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                
+                console.log('[Auth] Клік по кнопці зміни пароля');
+                
+                // Закрываем выпадающее меню
+                const userMenuDropdown = document.getElementById('user-menu-dropdown');
+                if (userMenuDropdown) {
+                    userMenuDropdown.classList.add('hidden');
+                }
+                
+                // Показываем модаль через небольшую задержку
+                setTimeout(() => {
+                    if (window.modals) {
+                        console.log('[Auth] Открываем модаль смены пароля');
+                        window.modals.show('change-password-modal');
+                    }
+                }, 100);
             });
+            
+            console.log('[Auth] Обработчик смены пароля установлен');
         }
 
+        // Настройка формы смены пароля
+        const changePasswordForm = document.getElementById('change-password-form');
         if (changePasswordForm) {
             changePasswordForm.addEventListener('submit', this.handlePasswordChange.bind(this));
         }
@@ -260,6 +294,11 @@ class AuthManager {
         
         // Запускаем периодическую проверку сессии
         this.startSessionCheck();
+        
+        // ВАЖНО: Перенастраиваем обработчик смены пароля после входа
+        setTimeout(() => {
+            this.setupPasswordChangeHandler();
+        }, 1000);
     }
 
     /**
@@ -509,6 +548,8 @@ class AuthManager {
         if (this.loginForm) {
             this.loginForm.removeEventListener('submit', this.handleLogin);
         }
+        
+        console.log('[Auth] Менеджер авторизации уничтожен');
     }
 }
 

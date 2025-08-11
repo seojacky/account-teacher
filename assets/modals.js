@@ -1,4 +1,4 @@
-// assets/modals.js
+// assets/modals.js - Упрощенная версия без конфликтов
 
 /**
  * Менеджер модальних вікон
@@ -8,6 +8,7 @@ class ModalsManager {
         this.isInitialized = false;
         this.currentModal = null;
         this.overlay = null;
+        this.isProcessing = false; // Флаг для предотвращения двойных вызовов
         
         // Bind методів
         this.handleOverlayClick = this.handleOverlayClick.bind(this);
@@ -42,19 +43,22 @@ class ModalsManager {
         // Клавіша Escape для закриття
         document.addEventListener('keydown', this.handleEscapeKey);
         
-        // Кнопки закриття модальних вікон
+        // Кнопки закриття модальных окон
         document.addEventListener('click', (event) => {
             if (event.target.matches('.modal-close, .modal-cancel')) {
                 this.handleCloseClick(event);
             }
         });
 
-        // User menu dropdown
+        // User menu dropdown - УПРОЩЕННЫЙ
         this.setupUserMenu();
+        
+        // НЕ ДОБАВЛЯЕМ специальные обработчики здесь
+        // Они будут добавлены в auth.js и users.js
     }
 
     /**
-     * Налаштування меню користувача
+     * Налаштування меню користувача - ПРОСТАЯ ВЕРСИЯ
      */
     setupUserMenu() {
         const userMenuBtn = document.getElementById('user-menu-btn');
@@ -66,11 +70,12 @@ class ModalsManager {
                 userMenuDropdown.classList.toggle('hidden');
             });
 
-            // Закриваємо меню при кліку поза ним
+            // Закрытие при клике вне меню
             document.addEventListener('click', () => {
                 userMenuDropdown.classList.add('hidden');
             });
 
+            // Предотвращение закрытия при клике по самому меню
             userMenuDropdown.addEventListener('click', (e) => {
                 e.stopPropagation();
             });
@@ -78,30 +83,77 @@ class ModalsManager {
     }
 
     /**
-     * Відображення модального вікна
+     * Відображення модального вікна - ЗАЩИЩЕННАЯ ВЕРСИЯ
      */
     show(modalId) {
+        // Предотвращаем двойные вызовы
+        if (this.isProcessing) {
+            console.log(`[Modals] Уже обрабатывается модаль, игнорируем: ${modalId}`);
+            return;
+        }
+        
+        this.isProcessing = true;
+        
+        console.log(`[Modals] Попытка открыть модаль: ${modalId}`);
+        
         const modal = document.getElementById(modalId);
         if (!modal) {
             console.error(`[Modals] Модальне вікно ${modalId} не знайдено`);
+            this.isProcessing = false;
             return;
         }
 
-        // Ховаємо поточне модальне вікно якщо є
-        if (this.currentModal) {
-            this.currentModal.style.display = 'none';
+        // ВАЖНО: Закрываем ВСЕ модали перед открытием новой
+        this.hideAll();
+
+        // Закрываем пользовательское меню
+        const userMenuDropdown = document.getElementById('user-menu-dropdown');
+        if (userMenuDropdown) {
+            userMenuDropdown.classList.add('hidden');
         }
 
-        this.currentModal = modal;
-        modal.style.display = 'block';
+        // Показываем overlay
         this.overlay.classList.remove('hidden');
         this.overlay.classList.add('show');
 
-        // Автофокус на перше поле вводу
-        const firstInput = modal.querySelector('input, select, textarea');
-        if (firstInput) {
-            setTimeout(() => firstInput.focus(), 100);
-        }
+        // Показываем модаль
+        modal.style.display = 'block';
+        this.currentModal = modal;
+
+        console.log(`[Modals] Модаль ${modalId} успешно открыта`);
+
+        // Автофокус на первое поле ввода
+        setTimeout(() => {
+            const firstInput = modal.querySelector('input:not([type="hidden"]), select, textarea');
+            if (firstInput) {
+                firstInput.focus();
+            }
+            
+            // Снимаем флаг обработки через небольшую задержку
+            this.isProcessing = false;
+        }, 200);
+    }
+
+    /**
+     * Закрытие всех модальных окон
+     */
+    hideAll() {
+        // Закрываем все модали
+        document.querySelectorAll('.modal').forEach(modal => {
+            modal.style.display = 'none';
+            
+            // Очищаем формы
+            const form = modal.querySelector('form');
+            if (form) {
+                form.reset();
+            }
+        });
+
+        this.currentModal = null;
+
+        // Скрываем overlay
+        this.overlay.classList.remove('show');
+        this.overlay.classList.add('hidden');
     }
 
     /**
@@ -112,17 +164,37 @@ class ModalsManager {
             const modal = document.getElementById(modalId);
             if (modal) {
                 modal.style.display = 'none';
+                
+                // Очищаем форму
+                const form = modal.querySelector('form');
+                if (form) {
+                    form.reset();
+                }
+            }
+            
+            if (this.currentModal && this.currentModal.id === modalId) {
+                this.currentModal = null;
             }
         } else if (this.currentModal) {
             this.currentModal.style.display = 'none';
+            
+            // Очищаем форму
+            const form = this.currentModal.querySelector('form');
+            if (form) {
+                form.reset();
+            }
+            
+            this.currentModal = null;
         }
 
-        this.currentModal = null;
+        // Скрываем overlay
         this.overlay.classList.remove('show');
-        
         setTimeout(() => {
             this.overlay.classList.add('hidden');
         }, 300);
+        
+        // Сбрасываем флаг обработки
+        this.isProcessing = false;
     }
 
     /**
