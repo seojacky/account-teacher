@@ -100,6 +100,7 @@ class AchievementsManager {
         this.handleTextareaChange = this.handleTextareaChange.bind(this);
         this.handleImport = this.handleImport.bind(this);
         this.handleExport = this.handleExport.bind(this);
+        this.handleExportSettings = this.handleExportSettings.bind(this);
         this.handleClearForm = this.handleClearForm.bind(this);
     }
 
@@ -184,11 +185,20 @@ class AchievementsManager {
 
         // Обработчики для кнопок
         const exportBtn = document.getElementById('export-achievements-btn');
+        const exportSettingsBtn = document.getElementById('export-settings-btn');
         const importBtn = document.getElementById('import-achievements-btn');
         const clearBtn = document.getElementById('clear-form-btn');
 
         if (exportBtn) {
             exportBtn.addEventListener('click', this.handleExport);
+            console.log('[Achievements] Export button event listener added');
+        }
+
+        if (exportSettingsBtn) {
+            exportSettingsBtn.addEventListener('click', this.handleExportSettings);
+            console.log('[Achievements] Export settings button event listener added');
+        } else {
+            console.error('[Achievements] Export settings button not found!');
         }
 
         if (importBtn) {
@@ -380,20 +390,44 @@ class AchievementsManager {
     }
 
     /**
-     * Обработка экспорта
+     * Обработка экспорта - выполняет экспорт с текущими настройками
      */
     async handleExport() {
+        console.log('[Achievements] handleExport called');
+        
         if (!this.currentUserId) {
             window.toast.error('Користувач не визначений');
             return;
         }
 
+        // Получаем сохраненные настройки
+        const settings = this.getSavedSettings();
+        console.log('[Achievements] Using settings:', settings);
+        
+        try {
+            await window.api.exportAchievements(this.currentUserId, settings);
+            window.toast.success('Файл успішно завантажено!');
+            
+        } catch (error) {
+            if (error instanceof ApiError) {
+                window.toast.error(`Помилка експорту: ${error.message}`);
+            } else {
+                window.toast.error('Невідома помилка експорту');
+            }
+        }
+    }
+
+    /**
+     * Обработка настроек экспорта - показывает модаль настроек
+     */
+    handleExportSettings() {
+        console.log('[Achievements] handleExportSettings called');
         // Показываем модаль настроек экспорта
         window.modals.show('export-settings-modal');
     }
 
     /**
-     * Экспорт с настройками
+     * Экспорт с настройками (вызывается из модали)
      */
     async exportWithSettings(settings) {
         try {
@@ -407,6 +441,26 @@ class AchievementsManager {
                 window.toast.error('Невідома помилка експорту');
             }
         }
+    }
+
+    /**
+     * Получение сохраненных настроек экспорта
+     */
+    getSavedSettings() {
+        try {
+            const saved = localStorage.getItem('export_settings');
+            if (saved) {
+                return JSON.parse(saved);
+            }
+        } catch (error) {
+            // Игнорируем ошибки парсинга
+        }
+        
+        // Возвращаем настройки по умолчанию
+        return {
+            encoding: 'utf8bom',
+            include_empty: true
+        };
     }
 
     /**
@@ -574,10 +628,8 @@ class ExportSettingsHelper {
         // Закрываем модаль
         window.modals.hide('export-settings-modal');
 
-        // Выполняем экспорт
-        if (window.achievements) {
-            await window.achievements.exportWithSettings(settings);
-        }
+        // Показываем подтверждение
+        window.toast.success('Налаштування збережено!');
     }
 
     static saveSettings(settings) {
@@ -587,25 +639,39 @@ class ExportSettingsHelper {
     static loadSavedSettings() {
         try {
             const saved = localStorage.getItem('export_settings');
+            let settings;
+            
             if (saved) {
-                const settings = JSON.parse(saved);
+                settings = JSON.parse(saved);
+            } else {
+                // Настройки по умолчанию для первого запуска
+                settings = {
+                    encoding: 'utf8bom',
+                    include_empty: true
+                };
+                // Сохраняем настройки по умолчанию
+                this.saveSettings(settings);
+            }
+            
+            // Применяем настройки к форме
+            const form = document.getElementById('export-settings-form');
+            if (form) {
+                const encodingRadio = form.querySelector(`input[name="encoding"][value="${settings.encoding}"]`);
+                if (encodingRadio) {
+                    encodingRadio.checked = true;
+                }
                 
-                // Применяем настройки к форме
-                const form = document.getElementById('export-settings-form');
-                if (form) {
-                    const encodingRadio = form.querySelector(`input[name="encoding"][value="${settings.encoding}"]`);
-                    if (encodingRadio) {
-                        encodingRadio.checked = true;
-                    }
-                    
-                    const includeEmptyCheckbox = form.querySelector('input[name="include_empty"]');
-                    if (includeEmptyCheckbox) {
-                        includeEmptyCheckbox.checked = settings.include_empty || false;
-                    }
+                const includeEmptyCheckbox = form.querySelector('input[name="include_empty"]');
+                if (includeEmptyCheckbox) {
+                    includeEmptyCheckbox.checked = settings.include_empty || false;
                 }
             }
         } catch (error) {
-            // Игнорируем ошибки загрузки настроек
+            // При ошибке устанавливаем настройки по умолчанию
+            this.saveSettings({
+                encoding: 'utf8bom',
+                include_empty: true
+            });
         }
     }
 }
