@@ -210,27 +210,45 @@ function handleAchievementsAPI($parts, $method) {
             }
             
         } elseif (count($parts) >= 3 && $parts[2] === 'export' && $method === 'GET') {
-            // Экспорт достижений в CSV
-            $encoding = $_GET['encoding'] ?? 'utf8bom';
-            $includeEmpty = isset($_GET['include_empty']) && $_GET['include_empty'] === 'true';
-            
-            $result = $achievementsManager->generateCSV($userId, $currentUser, $encoding, $includeEmpty);
+            // ВИПРАВЛЕНО: Экспорт достижений - повертаємо JSON з даними
+            $result = $achievementsManager->getAchievements($userId, $currentUser);
             
             if (isset($result['error'])) {
                 sendError($result['error'], $result['code']);
             } else {
-                // Возвращаем файл для скачивания
-                header('Content-Type: text/csv; charset=utf-8');
-                header('Content-Disposition: attachment; filename="' . $result['filename'] . '"');
+                // Додаємо метадані для експорту
+                $exportData = [
+                    'instructor_name' => $result['data']['full_name'],
+                    'instructor_info' => [
+                        'full_name' => $result['data']['full_name'],
+                        'employee_id' => $result['data']['employee_id'],
+                        'position' => $result['data']['position'],
+                        'faculty_name' => $result['data']['faculty_name'],
+                        'department_name' => $result['data']['department_name']
+                    ],
+                    'achievements' => []
+                ];
                 
-                if ($result['encoding'] === 'utf8bom') {
-                    header('Content-Type: text/csv; charset=utf-8');
-                } elseif ($result['encoding'] === 'windows1251') {
-                    header('Content-Type: text/csv; charset=windows-1251');
+                // Збираємо досягнення - ВИПРАВЛЕНО
+                $includeEmpty = isset($_GET['include_empty']) && $_GET['include_empty'] === 'true';
+                
+                for ($i = 1; $i <= 20; $i++) {
+                    $achievement = $result['data']["achievement_$i"] ?? null;
+                    
+                    // Завжди додаємо поле, навіть якщо воно порожнє
+                    if ($achievement || $includeEmpty) {
+                        $exportData['achievements'][$i] = $achievement ?? '';
+                    }
                 }
                 
-                echo $result['content'];
-                exit;
+                sendSuccess([
+                    'data' => $exportData,
+                    'export_settings' => [
+                        'encoding' => $_GET['encoding'] ?? 'utf8bom',
+                        'include_empty' => $includeEmpty,
+                        'timestamp' => date('Y-m-d H:i:s')
+                    ]
+                ]);
             }
             
         } elseif (count($parts) >= 3 && $parts[2] === 'import' && $method === 'POST') {

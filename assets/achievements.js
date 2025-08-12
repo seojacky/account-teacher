@@ -405,11 +405,22 @@ class AchievementsManager {
         console.log('[Achievements] Using settings:', settings);
         
         try {
-            await window.api.exportAchievements(this.currentUserId, settings);
-            window.toast.success('Файл успішно завантажено!');
+            const result = await window.api.exportAchievements(this.currentUserId, settings);
+            
+            // Перевіряємо результат експорту
+            if (result && result.success) {
+                window.toast.success('Файл успішно завантажено!');
+            } else {
+                // Якщо API повернув результат але без success
+                window.toast.error('Помилка при створенні файлу');
+            }
             
         } catch (error) {
+            console.error('[Achievements] Export error:', error);
+            
             if (error instanceof ApiError) {
+                window.toast.error(`Помилка експорту: ${error.message}`);
+            } else if (error.message) {
                 window.toast.error(`Помилка експорту: ${error.message}`);
             } else {
                 window.toast.error('Невідома помилка експорту');
@@ -431,11 +442,18 @@ class AchievementsManager {
      */
     async exportWithSettings(settings) {
         try {
-            await window.api.exportAchievements(this.currentUserId, settings);
-            window.toast.success('Файл успішно завантажено!');
+            const result = await window.api.exportAchievements(this.currentUserId, settings);
+            
+            if (result && result.success) {
+                window.toast.success('Файл успішно завантажено!');
+            } else {
+                window.toast.error('Помилка при створенні файлу');
+            }
             
         } catch (error) {
             if (error instanceof ApiError) {
+                window.toast.error(`Помилка експорту: ${error.message}`);
+            } else if (error.message) {
                 window.toast.error(`Помилка експорту: ${error.message}`);
             } else {
                 window.toast.error('Невідома помилка експорту');
@@ -667,7 +685,7 @@ class ExportSettingsHelper {
                 }
             }
         } catch (error) {
-            // При ошибке устанавливаем настройки по умолчанию
+				// При ошибке устанавливаем настройки по умолчанию
             this.saveSettings({
                 encoding: 'utf8bom',
                 include_empty: true

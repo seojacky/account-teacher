@@ -1,5 +1,5 @@
 <?php
-// classes/AchievementsManager.php
+// classes/AchievementsManager.php - Спрощена версія
 
 require_once '../config/database.php';
 require_once 'Auth.php';
@@ -121,9 +121,10 @@ class AchievementsManager {
     }
     
     /**
-     * Генерация CSV файла с достижениями
+     * СПРОЩЕНИЙ метод: повертає тільки дані для експорту в JSON
+     * Логіка генерації CSV винесена на клієнт
      */
-    public function generateCSV($userId, $currentUser, $encoding = 'utf8bom', $includeEmptyRows = false) {
+    public function getExportData($userId, $currentUser, $includeEmptyRows = false) {
         $achievementsResult = $this->getAchievements($userId, $currentUser);
         
         if (isset($achievementsResult['error'])) {
@@ -131,24 +132,30 @@ class AchievementsManager {
         }
         
         $achievements = $achievementsResult['data'];
-        $instructorName = $achievements['full_name'];
         
-        // Формируем содержимое CSV
-        $csvContent = "© 2025 Скрипт розроблено Калінський Є.О. Всі права захищені. https://t.me/big_jacky\n";
-        $csvContent .= "Викладач: {$instructorName}\n";
-        $csvContent .= "Тип;Інформація\n";
+        // Формуємо структуровані дані для експорту
+        $exportData = [
+            'instructor_name' => $achievements['full_name'],
+            'instructor_info' => [
+                'full_name' => $achievements['full_name'],
+                'employee_id' => $achievements['employee_id'],
+                'position' => $achievements['position'],
+                'faculty_name' => $achievements['faculty_name'],
+                'department_name' => $achievements['department_name']
+            ],
+            'achievements' => []
+        ];
         
+        // Збираємо досягнення
         $hasData = false;
-        
         for ($i = 1; $i <= 20; $i++) {
             $value = $achievements["achievement_$i"];
             
             if ($value && trim($value)) {
-                $cleanValue = $this->cleanTextForCSV($value);
-                $csvContent .= "{$i});\"" . str_replace('"', '""', $cleanValue) . "\"\n";
+                $exportData['achievements'][$i] = trim($value);
                 $hasData = true;
             } elseif ($includeEmptyRows) {
-                $csvContent .= "{$i});\n";
+                $exportData['achievements'][$i] = '';
                 $hasData = true;
             }
         }
@@ -157,19 +164,9 @@ class AchievementsManager {
             return ['error' => 'Немає даних для експорту', 'code' => 400];
         }
         
-        // Применяем кодировку
-        $finalContent = $this->applyEncoding($csvContent, $encoding);
-        
-        // Генерируем имя файла
-        $date = date('Y-m-d');
-        $transliteratedName = $this->transliterateUkrainian($instructorName);
-        $filename = "dosyagnennya-{$transliteratedName}_{$date}.csv";
-        
         return [
             'success' => true,
-            'content' => $finalContent,
-            'filename' => $filename,
-            'encoding' => $encoding
+            'data' => $exportData
         ];
     }
     
@@ -265,7 +262,7 @@ class AchievementsManager {
     }
     
     /**
-     * Экспорт отчета по всем пользователям в CSV
+     * ЗАЛИШАЄМО: Экспорт отчета по всем пользователям в CSV (для звітів потрібні файли)
      */
     public function exportReport($currentUser, $filters = []) {
         try {
@@ -413,55 +410,6 @@ class AchievementsManager {
     }
     
     /**
-     * Очистка текста для CSV
-     */
-    private function cleanTextForCSV($text) {
-        return trim(preg_replace('/\s+/', ' ', $text));
-    }
-    
-    /**
-     * Применение кодировки к содержимому
-     */
-    private function applyEncoding($content, $encoding) {
-        switch ($encoding) {
-            case 'utf8bom':
-                return "\xEF\xBB\xBF" . $content;
-            case 'windows1251':
-                return iconv('UTF-8', 'Windows-1251//IGNORE', $content);
-            default:
-                return $content;
-        }
-    }
-    
-    /**
-     * Транслитерация украинского текста
-     */
-    private function transliterateUkrainian($text) {
-        $map = [
-            'а' => 'a', 'б' => 'b', 'в' => 'v', 'г' => 'h', 'ґ' => 'g',
-            'д' => 'd', 'е' => 'e', 'є' => 'ie', 'ж' => 'zh', 'з' => 'z',
-            'и' => 'y', 'і' => 'i', 'ї' => 'i', 'й' => 'i', 'к' => 'k',
-            'л' => 'l', 'м' => 'm', 'н' => 'n', 'о' => 'o', 'п' => 'p',
-            'р' => 'r', 'с' => 's', 'т' => 't', 'у' => 'u', 'ф' => 'f',
-            'х' => 'kh', 'ц' => 'ts', 'ч' => 'ch', 'ш' => 'sh', 'щ' => 'shch',
-            'ю' => 'iu', 'я' => 'ia', 'ь' => '', "'" => '', '"' => '', '`' => '',
-            'А' => 'A', 'Б' => 'B', 'В' => 'V', 'Г' => 'H', 'Ґ' => 'G',
-            'Д' => 'D', 'Е' => 'E', 'Є' => 'Ye', 'Ж' => 'Zh', 'З' => 'Z',
-            'И' => 'Y', 'І' => 'I', 'Ї' => 'Yi', 'Й' => 'Y', 'К' => 'K',
-            'Л' => 'L', 'М' => 'M', 'Н' => 'N', 'О' => 'O', 'П' => 'P',
-            'Р' => 'R', 'С' => 'S', 'Т' => 'T', 'У' => 'U', 'Ф' => 'F',
-            'Х' => 'Kh', 'Ц' => 'Ts', 'Ч' => 'Ch', 'Ш' => 'Sh', 'Щ' => 'Shch',
-            'Ю' => 'Yu', 'Я' => 'Ya', 'Ь' => '', "'" => '', '"' => '', '`' => ''
-        ];
-        
-        $result = strtr($text, $map);
-        $result = preg_replace('/[^\w\s-]/', '', $result);
-        $result = preg_replace('/\s+/', '_', trim($result));
-        
-        return $result;
-    }
-    
-    /**
      * Очистка и санитизация текста
      */
     private function sanitizeText($text) {
@@ -470,7 +418,7 @@ class AchievementsManager {
     }
     
     /**
-     * Генерация CSV для отчета
+     * ЗАЛИШАЄМО: Генерация CSV для отчета (потрібно для звітів)
      */
     private function generateReportCSV($data) {
         $csv = "ID працівника;ПІБ;Посада;Факультет;Кафедра;Останнє оновлення;";
