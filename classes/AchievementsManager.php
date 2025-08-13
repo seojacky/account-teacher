@@ -1,27 +1,21 @@
 <?php
-// classes/AchievementsManager.php - Спрощена версія
+// classes/AchievementsManager.php - Очищена версія без залежності на Auth
 
 require_once '../config/database.php';
-require_once 'Auth.php';
+require_once '../config/config.php';
 
 class AchievementsManager {
     private $db;
-    private $auth;
     
     public function __construct() {
         $this->db = Database::getInstance()->getConnection();
-        $this->auth = new Auth();
     }
     
     /**
-     * Получение достижений пользователя
+     * Отримання досягнень користувача
+     * Права доступу вже перевірені middleware
      */
     public function getAchievements($userId, $currentUser) {
-        // Проверяем право доступа к данным пользователя
-        if (!$this->auth->canAccessUser($currentUser, $userId)) {
-            return ['error' => 'Доступ заборонено', 'code' => 403];
-        }
-        
         try {
             $stmt = $this->db->prepare("
                 SELECT a.*, u.full_name, u.employee_id, u.position,
@@ -37,7 +31,7 @@ class AchievementsManager {
             $achievements = $stmt->fetch();
             
             if (!$achievements) {
-                // Создаем пустую запись для пользователя
+                // Створюємо пусту запис для користувача
                 $achievements = $this->createEmptyAchievements($userId);
             }
             
@@ -53,15 +47,11 @@ class AchievementsManager {
     }
     
     /**
-     * Обновление достижений
+     * Оновлення досягнень
+     * Права доступу вже перевірені middleware
      */
     public function updateAchievements($userId, $achievementsData, $currentUser) {
-        // Проверяем права доступа
-        if (!$this->auth->canAccessUser($currentUser, $userId)) {
-            return ['error' => 'Доступ заборонено', 'code' => 403];
-        }
-        
-        // Викладач может редактировать только свои данные
+        // Додаткова перевірка: викладач може редагувати тільки свої дані
         if ($currentUser['role'] === 'vykladach' && $currentUser['id'] != $userId) {
             return ['error' => 'Ви можете редагувати тільки свої досягнення', 'code' => 403];
         }
@@ -69,7 +59,7 @@ class AchievementsManager {
         try {
             $this->db->beginTransaction();
             
-            // Проверяем существует ли запись
+            // Перевіряємо чи існує запис
             $stmt = $this->db->prepare("SELECT id FROM achievements WHERE user_id = ?");
             $stmt->execute([$userId]);
             $existing = $stmt->fetch();
@@ -77,23 +67,23 @@ class AchievementsManager {
             $achievementFields = [];
             $values = [];
             
-            // Подготавливаем поля для обновления
-            for ($i = 1; $i <= 20; $i++) {
+            // Підготовуємо поля для оновлення
+            for ($i = 1; $i <= Config::ACHIEVEMENTS_COUNT; $i++) {
                 $field = "achievement_$i";
                 $achievementFields[] = "$field = ?";
                 $values[] = isset($achievementsData[$field]) ? $this->sanitizeText($achievementsData[$field]) : null;
             }
             
             if ($existing) {
-                // Обновляем существующую запись
-                $sql = "UPDATE achievements SET " . implode(', ', $achievementFields) . " WHERE user_id = ?";
+                // Оновлюємо існуючий запис
+                $sql = "UPDATE achievements SET " . implode(', ', $achievementFields) . ", last_updated = NOW() WHERE user_id = ?";
                 $values[] = $userId;
                 
                 $stmt = $this->db->prepare($sql);
                 $stmt->execute($values);
             } else {
-                // Создаем новую запись
-                $fieldNames = ['user_id'] + array_map(function($i) { return "achievement_$i"; }, range(1, 20));
+                // Створюємо новий запис
+                $fieldNames = ['user_id'] + array_map(function($i) { return "achievement_$i"; }, range(1, Config::ACHIEVEMENTS_COUNT));
                 $placeholders = str_repeat('?,', count($fieldNames) - 1) . '?';
                 $sql = "INSERT INTO achievements (" . implode(', ', $fieldNames) . ") VALUES ($placeholders)";
                 
@@ -104,7 +94,7 @@ class AchievementsManager {
             
             $this->db->commit();
             
-            // Логируем изменения
+            // Логуємо зміни
             $this->logActivity($currentUser['id'], 'update_achievements', 
                 "Оновлено досягнення для користувача ID: $userId");
             
@@ -121,7 +111,7 @@ class AchievementsManager {
     }
     
     /**
-     * СПРОЩЕНИЙ метод: повертає тільки дані для експорту в JSON
+     * Отримання даних для експорту в JSON
      * Логіка генерації CSV винесена на клієнт
      */
     public function getExportData($userId, $currentUser, $includeEmptyRows = false) {
@@ -148,7 +138,7 @@ class AchievementsManager {
         
         // Збираємо досягнення
         $hasData = false;
-        for ($i = 1; $i <= 20; $i++) {
+        for ($i = 1; $i <= Config::ACHIEVEMENTS_COUNT; $i++) {
             $value = $achievements["achievement_$i"];
             
             if ($value && trim($value)) {
@@ -171,14 +161,10 @@ class AchievementsManager {
     }
     
     /**
-     * Импорт данных из CSV
+     * Імпорт даних з CSV
+     * Права доступу вже перевірені middleware
      */
     public function importFromCSV($userId, $csvContent, $currentUser) {
-        // Проверяем права доступа
-        if (!$this->auth->canAccessUser($currentUser, $userId)) {
-            return ['error' => 'Доступ заборонено', 'code' => 403];
-        }
-        
         try {
             $achievementsData = $this->parseCSV($csvContent);
             
@@ -195,13 +181,14 @@ class AchievementsManager {
     }
     
     /**
-     * Получение списка пользователей для отчетов (с учетом прав доступа)
+     * Отримання списку користувачів для звітів (з урахуванням прав доступу)
+     * Права доступу вже перевірені middleware
      */
     public function getUsersList($currentUser, $page = 1, $limit = 50) {
         try {
             $offset = ($page - 1) * $limit;
             
-            // Формируем запрос в зависимости от роли
+            // Формуємо запит в залежності від ролі
             $whereClause = "WHERE u.is_active = 1";
             $params = [];
             
@@ -235,7 +222,7 @@ class AchievementsManager {
             
             $users = $stmt->fetchAll();
             
-            // Получаем общее количество
+            // Отримуємо загальну кількість
             $countStmt = $this->db->prepare("
                 SELECT COUNT(*) as total 
                 FROM users u 
@@ -262,14 +249,15 @@ class AchievementsManager {
     }
     
     /**
-     * ЗАЛИШАЄМО: Экспорт отчета по всем пользователям в CSV (для звітів потрібні файли)
+     * Експорт звіту по всім користувачам в CSV
+     * Права доступу вже перевірені middleware
      */
     public function exportReport($currentUser, $filters = []) {
         try {
             $whereClause = "WHERE u.is_active = 1";
             $params = [];
             
-            // Применяем фильтры доступа по ролям
+            // Застосовуємо фільтри доступу по ролях
             if ($currentUser['role'] === 'zaviduvach') {
                 $whereClause .= " AND u.department_id = ?";
                 $params[] = $currentUser['department_id'];
@@ -281,7 +269,7 @@ class AchievementsManager {
                 $params[] = $currentUser['id'];
             }
             
-            // Дополнительные фильтры
+            // Додаткові фільтри
             if (!empty($filters['faculty_id'])) {
                 $whereClause .= " AND u.faculty_id = ?";
                 $params[] = $filters['faculty_id'];
@@ -292,13 +280,15 @@ class AchievementsManager {
                 $params[] = $filters['department_id'];
             }
             
+            $achievementFields = [];
+            for ($i = 1; $i <= Config::ACHIEVEMENTS_COUNT; $i++) {
+                $achievementFields[] = "a.achievement_$i";
+            }
+            
             $stmt = $this->db->prepare("
                 SELECT u.employee_id, u.full_name, u.position,
                        f.short_name as faculty_name, d.short_name as department_name,
-                       a.achievement_1, a.achievement_2, a.achievement_3, a.achievement_4, a.achievement_5,
-                       a.achievement_6, a.achievement_7, a.achievement_8, a.achievement_9, a.achievement_10,
-                       a.achievement_11, a.achievement_12, a.achievement_13, a.achievement_14, a.achievement_15,
-                       a.achievement_16, a.achievement_17, a.achievement_18, a.achievement_19, a.achievement_20,
+                       " . implode(', ', $achievementFields) . ",
                        a.last_updated
                 FROM users u
                 LEFT JOIN faculties f ON u.faculty_id = f.id
@@ -311,7 +301,7 @@ class AchievementsManager {
             $stmt->execute($params);
             $data = $stmt->fetchAll();
             
-            // Формируем CSV
+            // Формуємо CSV
             $csvContent = $this->generateReportCSV($data);
             
             $filename = "report_achievements_" . date('Y-m-d_H-i-s') . ".csv";
@@ -329,11 +319,11 @@ class AchievementsManager {
     }
     
     /**
-     * Создание пустой записи достижений для пользователя
+     * Створення пустого запису досягнень для користувача
      */
     private function createEmptyAchievements($userId) {
         try {
-            // Получаем информацию о пользователе
+            // Отримуємо інформацію про користувача
             $stmt = $this->db->prepare("
                 SELECT u.full_name, u.employee_id, u.position,
                        f.short_name as faculty_name, d.short_name as department_name
@@ -358,8 +348,8 @@ class AchievementsManager {
                 'department_name' => $user['department_name']
             ];
             
-            // Добавляем пустые поля достижений
-            for ($i = 1; $i <= 20; $i++) {
+            // Додаємо пусті поля досягнень
+            for ($i = 1; $i <= Config::ACHIEVEMENTS_COUNT; $i++) {
                 $achievements["achievement_$i"] = null;
             }
             
@@ -372,35 +362,35 @@ class AchievementsManager {
     }
     
     /**
-     * Парсинг CSV файла
+     * Парсинг CSV файлу
      */
     private function parseCSV($csvContent) {
         $achievements = [];
         
-        // Удаляем BOM если есть
+        // Видаляємо BOM якщо є
         if (substr($csvContent, 0, 3) === "\xEF\xBB\xBF") {
             $csvContent = substr($csvContent, 3);
         }
         
         $lines = preg_split('/\r\n|\r|\n/', $csvContent);
         
-        // Пропускаем служебные строки (первые 3)
+        // Пропускаємо службові рядки (перші 3)
         $dataLines = array_slice($lines, 3);
         
         foreach ($dataLines as $line) {
             if (empty(trim($line))) continue;
             
-            // Парсим строку с учетом CSV формата
+            // Парсимо рядок з урахуванням CSV формату
             if (preg_match('/^(\d+)\);(.*)$/', $line, $matches)) {
                 $number = intval($matches[1]);
                 $value = $matches[2];
                 
-                // Убираем кавычки и обрабатываем экранированные кавычки
+                // Прибираємо лапки і обробляємо екрановані лапки
                 if (preg_match('/^"(.*)"$/', $value, $valueMatches)) {
                     $value = str_replace('""', '"', $valueMatches[1]);
                 }
                 
-                if ($number >= 1 && $number <= 20) {
+                if ($number >= 1 && $number <= Config::ACHIEVEMENTS_COUNT) {
                     $achievements["achievement_$number"] = trim($value);
                 }
             }
@@ -410,21 +400,29 @@ class AchievementsManager {
     }
     
     /**
-     * Очистка и санитизация текста
+     * Очищення та санітизація тексту
      */
     private function sanitizeText($text) {
         if (empty($text)) return null;
-        return trim($text);
+        
+        $text = trim($text);
+        
+        // Перевіряємо максимальну довжину
+        if (strlen($text) > Config::ACHIEVEMENTS_MAX_LENGTH) {
+            $text = substr($text, 0, Config::ACHIEVEMENTS_MAX_LENGTH);
+        }
+        
+        return $text;
     }
     
     /**
-     * ЗАЛИШАЄМО: Генерация CSV для отчета (потрібно для звітів)
+     * Генерація CSV для звіту
      */
     private function generateReportCSV($data) {
         $csv = "ID працівника;ПІБ;Посада;Факультет;Кафедра;Останнє оновлення;";
         
-        // Добавляем заголовки для достижений
-        for ($i = 1; $i <= 20; $i++) {
+        // Додаємо заголовки для досягнень
+        for ($i = 1; $i <= Config::ACHIEVEMENTS_COUNT; $i++) {
             $csv .= "Досягнення $i;";
         }
         $csv .= "\n";
@@ -437,7 +435,7 @@ class AchievementsManager {
             $csv .= '"' . ($row['department_name'] ?? '') . '";';
             $csv .= '"' . ($row['last_updated'] ?? '') . '";';
             
-            for ($i = 1; $i <= 20; $i++) {
+            for ($i = 1; $i <= Config::ACHIEVEMENTS_COUNT; $i++) {
                 $achievement = $row["achievement_$i"] ?? '';
                 $csv .= '"' . str_replace('"', '""', $achievement) . '";';
             }
@@ -448,7 +446,7 @@ class AchievementsManager {
     }
     
     /**
-     * Логирование активности
+     * Логування активності
      */
     private function logActivity($userId, $action, $description) {
         $ipAddress = $_SERVER['REMOTE_ADDR'] ?? 'unknown';

@@ -20,6 +20,9 @@ class App {
         
         console.log('[App] Ініціалізація додатка...');
         
+        // Завантажуємо версію системи
+        await this.loadVersion();
+        
         // Ініціалізуємо компоненти в правильному порядку
         await this.initializeComponents();
         
@@ -31,6 +34,37 @@ class App {
         
         this.isInitialized = true;
         console.log('[App] Додаток ініціалізовано');
+    }
+
+    /**
+     * Завантаження версії системи
+     */
+    async loadVersion() {
+        try {
+            const response = await window.api.get('system/version');
+            
+            if (response.success && response.version) {
+                const version = `v${response.version}`;
+                
+                // Оновлюємо версію в головному інтерфейсі
+                const appVersionElement = document.getElementById('app-version');
+                if (appVersionElement) {
+                    appVersionElement.textContent = version;
+                    appVersionElement.title = response.full_name || `Версія ${response.version}`;
+                }
+                
+                // Оновлюємо версію на екрані логіну
+                const loginVersionElement = document.getElementById('login-version');
+                if (loginVersionElement) {
+                    loginVersionElement.textContent = `Версія ${response.version}`;
+                }
+                
+                console.log(`[App] Завантажено версію: ${version}`);
+            }
+        } catch (error) {
+            console.warn('[App] Не вдалося завантажити версію:', error);
+            // Залишаємо дефолтну версію
+        }
     }
 
     /**

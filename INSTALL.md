@@ -46,7 +46,7 @@ CREATE DATABASE kalinsky_edebo_system CHARACTER SET utf8mb4 COLLATE utf8mb4_unic
 ### Шаг 5: Инициализация базы данных
 ```sql
 -- Выполните скрипт инициализации:
-mysql -u your_username -p kalinsky_edebo_system < database/init.sql
+mysql -u your_username -p kalinsky_edebo_system < start/init.sql
 ```
 
 ### Шаг 6: Настройка прав доступа

@@ -1,31 +1,22 @@
 <?php
-// classes/UserManager.php
-
-//require_once 'config/database.php';
-//require_once 'classes/Auth.php';
+// classes/UserManager.php - Очищена версія без залежності на Auth
 
 require_once '../config/database.php';
-require_once 'Auth.php';
+require_once '../config/config.php';
 
 class UserManager {
     private $db;
-    private $auth;
     
     public function __construct() {
         $this->db = Database::getInstance()->getConnection();
-        $this->auth = new Auth();
     }
     
     /**
-     * Создание нового пользователя
+     * Створення нового користувача
+     * Middleware вже перевірив що $currentUser має роль admin
      */
     public function createUser($userData, $currentUser) {
-        // Проверяем права доступа - только админ может создавать пользователей
-        if ($currentUser['role'] !== 'admin') {
-            return ['error' => 'Недостатньо прав для створення користувачів', 'code' => 403];
-        }
-        
-        // Валидация данных
+        // Валідація даних
         $validation = $this->validateUserData($userData);
         if (!$validation['valid']) {
             return ['error' => $validation['message'], 'code' => 400];
@@ -34,7 +25,7 @@ class UserManager {
         try {
             $this->db->beginTransaction();
             
-            // Проверяем уникальность employee_id и email
+            // Перевіряємо унікальність employee_id та email
             if ($this->isEmployeeIdExists($userData['employee_id'])) {
                 return ['error' => 'ID працівника вже існує', 'code' => 400];
             }
@@ -43,11 +34,11 @@ class UserManager {
                 return ['error' => 'Email вже використовується', 'code' => 400];
             }
             
-            // Генерируем пароль если не указан
+            // Генеруємо пароль якщо не вказаний
             $password = !empty($userData['password']) ? $userData['password'] : $this->generatePassword();
             $passwordHash = password_hash($password, PASSWORD_DEFAULT);
             
-            // Вставляем пользователя
+            // Вставляємо користувача
             $stmt = $this->db->prepare("
                 INSERT INTO users (employee_id, role_id, faculty_id, department_id, 
                                  full_name, email, password_hash, position, is_active) 
@@ -70,7 +61,7 @@ class UserManager {
             
             $this->db->commit();
             
-            // Логируем создание пользователя
+            // Логуємо створення користувача
             $this->logActivity($currentUser['id'], 'create_user', 
                 "Створено користувача: {$userData['full_name']} (ID: {$userData['employee_id']})");
             
@@ -83,24 +74,20 @@ class UserManager {
             
         } catch (Exception $e) {
             $this->db->rollBack();
-            writeErrorLog("Create user error: " . $e->getMessage());
+            Database::getInstance()->writeLog("Create user error: " . $e->getMessage(), 'error');
             return ['error' => 'Помилка створення користувача', 'code' => 500];
         }
     }
     
     /**
-     * Обновление данных пользователя
+     * Оновлення даних користувача
+     * Права доступу перевіряються на рівні middleware
      */
     public function updateUser($userId, $userData, $currentUser) {
-        // Проверяем права доступа
-        if (!$this->canManageUser($currentUser, $userId)) {
-            return ['error' => 'Недостатньо прав для редагування користувача', 'code' => 403];
-        }
-        
         try {
             $this->db->beginTransaction();
             
-            // Получаем текущие данные пользователя
+            // Отримуємо поточні дані користувача
             $currentData = $this->getUserById($userId);
             if (!$currentData) {
                 return ['error' => 'Користувача не знайдено', 'code' => 404];
@@ -109,7 +96,7 @@ class UserManager {
             $updateFields = [];
             $updateValues = [];
             
-            // Проверяем какие поля можно обновлять
+            // Перевіряємо які поля можна оновлювати
             $allowedFields = $this->getAllowedUpdateFields($currentUser);
             
             foreach ($allowedFields as $field) {
@@ -132,7 +119,7 @@ class UserManager {
                             if (!empty($userData[$field])) {
                                 $userData[$field] = password_hash($userData[$field], PASSWORD_DEFAULT);
                             } else {
-                                continue 2; // Пропускаем пустой пароль
+                                continue 2; // Пропускаємо пустий пароль
                             }
                             break;
                     }
@@ -146,7 +133,7 @@ class UserManager {
                 return ['error' => 'Немає даних для оновлення', 'code' => 400];
             }
             
-            // Обновляем пользователя
+            // Оновлюємо користувача
             $sql = "UPDATE users SET " . implode(', ', $updateFields) . " WHERE id = ?";
             $updateValues[] = $userId;
             
@@ -155,7 +142,7 @@ class UserManager {
             
             $this->db->commit();
             
-            // Логируем обновление
+            // Логуємо оновлення
             $this->logActivity($currentUser['id'], 'update_user', 
                 "Оновлено дані користувача ID: $userId");
             
@@ -166,13 +153,13 @@ class UserManager {
             
         } catch (Exception $e) {
             $this->db->rollBack();
-            writeErrorLog("Update user error: " . $e->getMessage());
+            Database::getInstance()->writeLog("Update user error: " . $e->getMessage(), 'error');
             return ['error' => 'Помилка оновлення користувача', 'code' => 500];
         }
     }
     
     /**
-     * Получение пользователя по ID
+     * Отримання користувача по ID
      */
     public function getUserById($userId, $currentUser = null) {
         try {
@@ -194,34 +181,30 @@ class UserManager {
                 return null;
             }
             
-            // Проверяем права доступа если указан текущий пользователь
-            if ($currentUser && !$this->auth->canAccessUser($currentUser, $userId)) {
-                return null;
-            }
-            
-            // Убираем пароль из ответа
+            // Прибираємо пароль з відповіді
             unset($user['password_hash']);
             
             return $user;
             
         } catch (Exception $e) {
-            writeErrorLog("Get user by ID error: " . $e->getMessage());
+            Database::getInstance()->writeLog("Get user by ID error: " . $e->getMessage(), 'error');
             return null;
         }
     }
     
     /**
-     * Получение списка пользователей с фильтрацией и пагинацией
+     * Отримання списку користувачів з фільтрацією та пагінацією
+     * Права доступу вже перевірені middleware
      */
     public function getUsersList($currentUser, $filters = [], $page = 1, $limit = 50) {
         try {
             $offset = ($page - 1) * $limit;
             
-            // Базовые условия
+            // Базові умови
             $whereClause = "WHERE u.is_active = 1";
             $params = [];
             
-            // Применяем ограничения по роли
+            // Застосовуємо обмеження по ролі (фільтрація даних за роллю)
             if ($currentUser['role'] === 'zaviduvach') {
                 $whereClause .= " AND u.department_id = ?";
                 $params[] = $currentUser['department_id'];
@@ -233,7 +216,7 @@ class UserManager {
                 $params[] = $currentUser['id'];
             }
             
-            // Применяем дополнительные фильтры
+            // Застосовуємо додаткові фільтри
             if (!empty($filters['faculty_id'])) {
                 $whereClause .= " AND u.faculty_id = ?";
                 $params[] = $filters['faculty_id'];
@@ -256,7 +239,7 @@ class UserManager {
                 $params[] = $searchTerm;
             }
             
-            // Получаем пользователей
+            // Отримуємо користувачів
             $stmt = $this->db->prepare("
                 SELECT u.id, u.employee_id, u.full_name, u.email, u.position, u.is_active,
                        u.last_login, u.created_at,
@@ -277,7 +260,7 @@ class UserManager {
             $stmt->execute($params);
             $users = $stmt->fetchAll();
             
-            // Получаем общее количество
+            // Отримуємо загальну кількість
             $countStmt = $this->db->prepare("
                 SELECT COUNT(*) as total 
                 FROM users u 
@@ -301,21 +284,17 @@ class UserManager {
             ];
             
         } catch (Exception $e) {
-            writeErrorLog("Get users list error: " . $e->getMessage());
+            Database::getInstance()->writeLog("Get users list error: " . $e->getMessage(), 'error');
             return ['error' => 'Помилка отримання списку користувачів', 'code' => 500];
         }
     }
     
     /**
-     * Деактивация пользователя
+     * Деактивація користувача
+     * Права доступу вже перевірені middleware (тільки admin може викликати цей метод)
      */
     public function deactivateUser($userId, $currentUser) {
-        // Только админ может деактивировать пользователей
-        if ($currentUser['role'] !== 'admin') {
-            return ['error' => 'Недостатньо прав для деактивації користувача', 'code' => 403];
-        }
-        
-        // Нельзя деактивировать самого себя
+        // Не можна деактивувати самого себе
         if ($userId == $currentUser['id']) {
             return ['error' => 'Не можна деактивувати самого себе', 'code' => 400];
         }
@@ -324,11 +303,11 @@ class UserManager {
             $stmt = $this->db->prepare("UPDATE users SET is_active = 0 WHERE id = ?");
             $stmt->execute([$userId]);
             
-            // Удаляем все активные сессии пользователя
+            // Видаляємо всі активні сесії користувача
             $stmt = $this->db->prepare("DELETE FROM sessions WHERE user_id = ?");
             $stmt->execute([$userId]);
             
-            // Логируем деактивацию
+            // Логуємо деактивацію
             $this->logActivity($currentUser['id'], 'deactivate_user', 
                 "Деактивовано користувача ID: $userId");
             
@@ -338,25 +317,21 @@ class UserManager {
             ];
             
         } catch (Exception $e) {
-            writeErrorLog("Deactivate user error: " . $e->getMessage());
+            Database::getInstance()->writeLog("Deactivate user error: " . $e->getMessage(), 'error');
             return ['error' => 'Помилка деактивації користувача', 'code' => 500];
         }
     }
     
     /**
-     * Активация пользователя
+     * Активація користувача
+     * Права доступу вже перевірені middleware (тільки admin може викликати цей метод)
      */
     public function activateUser($userId, $currentUser) {
-        // Только админ может активировать пользователей
-        if ($currentUser['role'] !== 'admin') {
-            return ['error' => 'Недостатньо прав для активації користувача', 'code' => 403];
-        }
-        
         try {
             $stmt = $this->db->prepare("UPDATE users SET is_active = 1 WHERE id = ?");
             $stmt->execute([$userId]);
             
-            // Логируем активацию
+            // Логуємо активацію
             $this->logActivity($currentUser['id'], 'activate_user', 
                 "Активовано користувача ID: $userId");
             
@@ -366,20 +341,16 @@ class UserManager {
             ];
             
         } catch (Exception $e) {
-            writeErrorLog("Activate user error: " . $e->getMessage());
+            Database::getInstance()->writeLog("Activate user error: " . $e->getMessage(), 'error');
             return ['error' => 'Помилка активації користувача', 'code' => 500];
         }
     }
     
     /**
-     * Массовый импорт пользователей из CSV
+     * Масовий імпорт користувачів з CSV
+     * Права доступу вже перевірені middleware (тільки admin може викликати цей метод)
      */
     public function importUsersFromCSV($csvData, $currentUser) {
-        // Только админ может импортировать пользователей
-        if ($currentUser['role'] !== 'admin') {
-            return ['error' => 'Недостатньо прав для імпорту користувачів', 'code' => 403];
-        }
-        
         try {
             $users = $this->parseUsersCSV($csvData);
             
@@ -416,13 +387,13 @@ class UserManager {
             
         } catch (Exception $e) {
             $this->db->rollBack();
-            writeErrorLog("Import users error: " . $e->getMessage());
+            Database::getInstance()->writeLog("Import users error: " . $e->getMessage(), 'error');
             return ['error' => 'Помилка імпорту користувачів', 'code' => 500];
         }
     }
     
     /**
-     * Получение ролей
+     * Отримання ролей
      */
     public function getRoles() {
         try {
@@ -435,13 +406,13 @@ class UserManager {
             ];
             
         } catch (Exception $e) {
-            writeErrorLog("Get roles error: " . $e->getMessage());
+            Database::getInstance()->writeLog("Get roles error: " . $e->getMessage(), 'error');
             return ['error' => 'Помилка отримання ролей', 'code' => 500];
         }
     }
     
     /**
-     * Получение факультетов
+     * Отримання факультетів
      */
     public function getFaculties() {
         try {
@@ -454,13 +425,13 @@ class UserManager {
             ];
             
         } catch (Exception $e) {
-            writeErrorLog("Get faculties error: " . $e->getMessage());
+            Database::getInstance()->writeLog("Get faculties error: " . $e->getMessage(), 'error');
             return ['error' => 'Помилка отримання факультетів', 'code' => 500];
         }
     }
     
     /**
-     * Получение кафедр факультета
+     * Отримання кафедр факультету
      */
     public function getDepartments($facultyId = null) {
         try {
@@ -483,13 +454,13 @@ class UserManager {
             ];
             
         } catch (Exception $e) {
-            writeErrorLog("Get departments error: " . $e->getMessage());
+            Database::getInstance()->writeLog("Get departments error: " . $e->getMessage(), 'error');
             return ['error' => 'Помилка отримання кафедр', 'code' => 500];
         }
     }
     
     /**
-     * Валидация данных пользователя
+     * Валідація даних користувача
      */
     private function validateUserData($userData) {
         if (empty($userData['employee_id'])) {
@@ -512,7 +483,7 @@ class UserManager {
     }
     
     /**
-     * Проверка существования employee_id
+     * Перевірка існування employee_id
      */
     private function isEmployeeIdExists($employeeId, $excludeUserId = null) {
         $whereClause = "WHERE employee_id = ?";
@@ -530,7 +501,7 @@ class UserManager {
     }
     
     /**
-     * Проверка существования email
+     * Перевірка існування email
      */
     private function isEmailExists($email, $excludeUserId = null) {
         $whereClause = "WHERE email = ?";
@@ -548,7 +519,7 @@ class UserManager {
     }
     
     /**
-     * Генерация случайного пароля
+     * Генерація випадкового пароля
      */
     private function generatePassword($length = 8) {
         $chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -556,25 +527,8 @@ class UserManager {
     }
     
     /**
-     * Проверка прав на управление пользователем
-     */
-    private function canManageUser($currentUser, $targetUserId) {
-        // Админ может управлять всеми
-        if ($currentUser['role'] === 'admin') {
-            return true;
-        }
-        
-        // Викладач может редактировать только себя (ограниченно)
-        if ($currentUser['role'] === 'vykladach') {
-            return $currentUser['id'] == $targetUserId;
-        }
-        
-        // Остальные роли не могут управлять пользователями
-        return false;
-    }
-    
-    /**
-     * Получение разрешенных для обновления полей
+     * Отримання дозволених для оновлення полів
+     * Права вже перевірені на рівні middleware
      */
     private function getAllowedUpdateFields($currentUser) {
         if ($currentUser['role'] === 'admin') {
@@ -583,20 +537,20 @@ class UserManager {
         }
         
         if ($currentUser['role'] === 'vykladach') {
-            return ['email', 'password']; // Викладач может менять только email и пароль
+            return ['email', 'password']; // Викладач може міняти тільки email та пароль
         }
         
         return [];
     }
     
     /**
-     * Парсинг CSV с пользователями
+     * Парсинг CSV з користувачами
      */
     private function parseUsersCSV($csvData) {
         $users = [];
         $lines = str_getcsv($csvData, "\n");
         
-        // Пропускаем заголовок
+        // Пропускаємо заголовок
         $header = array_shift($lines);
         
         foreach ($lines as $line) {
@@ -610,7 +564,7 @@ class UserManager {
                     'full_name' => trim($data[1]),
                     'email' => !empty($data[2]) ? trim($data[2]) : null,
                     'position' => !empty($data[3]) ? trim($data[3]) : null,
-                    'role_id' => 4 // По умолчанию роль викладача
+                    'role_id' => 4 // За замовчуванням роль викладача
                 ];
             }
         }
@@ -619,11 +573,11 @@ class UserManager {
     }
     
     /**
-     * Создание пользователя при импорте
+     * Створення користувача при імпорті
      */
     private function createUserFromImport($userData, $currentUser) {
         try {
-            // Проверяем уникальность
+            // Перевіряємо унікальність
             if ($this->isEmployeeIdExists($userData['employee_id'])) {
                 return ['success' => false, 'message' => 'ID працівника вже існує'];
             }
@@ -632,7 +586,7 @@ class UserManager {
                 return ['success' => false, 'message' => 'Email вже використовується'];
             }
             
-            // Генерируем пароль
+            // Генеруємо пароль
             $password = $this->generatePassword();
             $passwordHash = password_hash($password, PASSWORD_DEFAULT);
             
@@ -658,7 +612,7 @@ class UserManager {
     }
     
     /**
-     * Логирование активности
+     * Логування активності
      */
     private function logActivity($userId, $action, $description) {
         $ipAddress = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
@@ -671,7 +625,7 @@ class UserManager {
             ");
             $stmt->execute([$userId, $action, $description, $ipAddress, $userAgent]);
         } catch (Exception $e) {
-            writeErrorLog("Log activity error: " . $e->getMessage());
+            Database::getInstance()->writeLog("Log activity error: " . $e->getMessage(), 'error');
         }
     }
 }
