@@ -1,5 +1,5 @@
 <?php
-// api/index.php - Исправленная версия с полной поддержкой достижений
+// api/index.php - Рефакторована версія з AuthMiddleware
 
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
@@ -35,7 +35,9 @@ if (!function_exists('getallheaders')) {
 // Подключаем необходимые файлы
 try {
     require_once __DIR__ . '/../config/database.php';
+    require_once __DIR__ . '/../config/config.php';
     require_once __DIR__ . '/../classes/Auth.php';
+    require_once __DIR__ . '/../classes/AuthMiddleware.php';
     require_once __DIR__ . '/../classes/AchievementsManager.php';
     require_once __DIR__ . '/../classes/UserManager.php';
 } catch (Exception $e) {
@@ -58,20 +60,51 @@ try {
     $parts = array_values($parts);
     $method = $_SERVER['REQUEST_METHOD'];
     
-    // Роутинг
+    // Создаем экземпляр middleware
+    $middleware = new AuthMiddleware();
+    
+    // Роутинг с middleware
     if (count($parts) >= 2 && $parts[0] === 'auth') {
+        // Auth endpoints - публичные, без middleware
         handleAuth($parts, $method);
+        
     } elseif (count($parts) >= 1 && $parts[0] === 'users') {
-        // Проверяем справочники
+        // Users endpoints - только для керівництва та адміна
         if (count($parts) >= 2 && in_array($parts[1], ['roles', 'faculties', 'departments'])) {
-            handleUsersReferences($parts, $method);
+            // Справочники - для всех авторизованных
+            $middleware->handle(function($user) use ($parts, $method) {
+                handleUsersReferences($parts, $method, $user);
+            });
         } else {
-            handleUsersAPI($parts, $method);
+            // Управление пользователями - только для керівництва
+            $middleware->requireRole(['admin', 'dekanat', 'zaviduvach'], function($user) use ($parts, $method) {
+                handleUsersAPI($parts, $method, $user);
+            });
         }
+        
     } elseif (count($parts) >= 1 && $parts[0] === 'achievements') {
-        handleAchievementsAPI($parts, $method);
+        // Achievements endpoints - для всех авторизованных с проверкой доступа к пользователю
+        if (count($parts) >= 2) {
+            $targetUserId = intval($parts[1]);
+            $middleware->requireUserAccess($targetUserId, function($user) use ($parts, $method) {
+                handleAchievementsAPI($parts, $method, $user);
+            });
+        } else {
+            $middleware->handle(function($user) use ($parts, $method) {
+                handleAchievementsAPI($parts, $method, $user);
+            });
+        }
+        
     } elseif (count($parts) >= 1 && $parts[0] === 'reports') {
-        handleReportsAPI($parts, $method);
+        // Reports endpoints - только для керівництва та адміна
+        $middleware->requireRole(['admin', 'dekanat', 'zaviduvach'], function($user) use ($parts, $method) {
+            handleReportsAPI($parts, $method, $user);
+        });
+        
+    } elseif (count($parts) >= 1 && $parts[0] === 'system') {
+        // System endpoints - публичные или для админа
+        handleSystemAPI($parts, $method);
+        
     } else {
         sendError('Endpoint not found', 404);
     }
@@ -81,7 +114,7 @@ try {
     sendError('Server error: ' . $e->getMessage(), 500);
 }
 
-// ============ ФУНКЦИИ АВТОРИЗАЦИИ ============
+// ============ ФУНКЦИИ АВТОРИЗАЦИИ (без изменений) ============
 
 function handleAuth($parts, $method) {
     $auth = new Auth();
@@ -103,7 +136,10 @@ function handleAuth($parts, $method) {
         }
         
     } elseif ($parts[1] === 'me' && $method === 'GET') {
-        $user = getCurrentUser();
+        // Используем middleware для получения текущего пользователя
+        $middleware = new AuthMiddleware();
+        $user = $middleware->authenticate();
+        
         if ($user) {
             sendSuccess(['user' => $user]);
         } else {
@@ -132,51 +168,43 @@ function handleAuth($parts, $method) {
         sendSuccess(['message' => 'Logged out successfully']);
         
     } elseif ($parts[1] === 'change-password' && $method === 'POST') {
-        $user = getCurrentUser();
-        if (!$user) {
-            sendError('Not authenticated', 401);
-            return;
-        }
-        
-        $input = json_decode(file_get_contents('php://input'), true);
-        
-        if (empty($input['current_password']) || empty($input['new_password'])) {
-            sendError('Current and new passwords are required', 400);
-            return;
-        }
-        
-        // Проверяем текущий пароль
-        $db = Database::getInstance()->getConnection();
-        $stmt = $db->prepare("SELECT password_hash FROM users WHERE id = ?");
-        $stmt->execute([$user['id']]);
-        $userData = $stmt->fetch();
-        
-        if (!$userData || !password_verify($input['current_password'], $userData['password_hash'])) {
-            sendError('Current password is incorrect', 400);
-            return;
-        }
-        
-        // Обновляем пароль
-        $newPasswordHash = password_hash($input['new_password'], PASSWORD_DEFAULT);
-        $stmt = $db->prepare("UPDATE users SET password_hash = ? WHERE id = ?");
-        $stmt->execute([$newPasswordHash, $user['id']]);
-        
-        sendSuccess(['message' => 'Password changed successfully']);
+        // Используем middleware для проверки авторизации
+        $middleware = new AuthMiddleware();
+        $middleware->handle(function($user) {
+            $input = json_decode(file_get_contents('php://input'), true);
+            
+            if (empty($input['current_password']) || empty($input['new_password'])) {
+                sendError('Current and new passwords are required', 400);
+                return;
+            }
+            
+            // Проверяем текущий пароль
+            $db = Database::getInstance()->getConnection();
+            $stmt = $db->prepare("SELECT password_hash FROM users WHERE id = ?");
+            $stmt->execute([$user['id']]);
+            $userData = $stmt->fetch();
+            
+            if (!$userData || !password_verify($input['current_password'], $userData['password_hash'])) {
+                sendError('Current password is incorrect', 400);
+                return;
+            }
+            
+            // Обновляем пароль
+            $newPasswordHash = password_hash($input['new_password'], PASSWORD_DEFAULT);
+            $stmt = $db->prepare("UPDATE users SET password_hash = ? WHERE id = ?");
+            $stmt->execute([$newPasswordHash, $user['id']]);
+            
+            sendSuccess(['message' => 'Password changed successfully']);
+        });
         
     } else {
         sendError('Invalid auth endpoint', 404);
     }
 }
 
-// ============ ФУНКЦИИ ДОСТИЖЕНИЙ ============
+// ============ ФУНКЦИИ ДОСТИЖЕНИЙ (обновленные) ============
 
-function handleAchievementsAPI($parts, $method) {
-    $currentUser = getCurrentUser();
-    if (!$currentUser) {
-        sendError('Authentication required', 401);
-        return;
-    }
-    
+function handleAchievementsAPI($parts, $method, $user) {
     $achievementsManager = new AchievementsManager();
     
     if (count($parts) >= 2) {
@@ -184,13 +212,8 @@ function handleAchievementsAPI($parts, $method) {
         
         if ($method === 'GET') {
             // Получение достижений пользователя
-            $result = $achievementsManager->getAchievements($userId, $currentUser);
-            
-            if (isset($result['error'])) {
-                sendError($result['error'], $result['code']);
-            } else {
-                sendSuccess($result);
-            }
+            $result = $achievementsManager->getAchievements($userId, $user);
+            sendResponse($result);
             
         } elseif ($method === 'PUT') {
             // Обновление достижений
@@ -201,22 +224,17 @@ function handleAchievementsAPI($parts, $method) {
                 return;
             }
             
-            $result = $achievementsManager->updateAchievements($userId, $input, $currentUser);
-            
-            if (isset($result['error'])) {
-                sendError($result['error'], $result['code']);
-            } else {
-                sendSuccess($result);
-            }
+            $result = $achievementsManager->updateAchievements($userId, $input, $user);
+            sendResponse($result);
             
         } elseif (count($parts) >= 3 && $parts[2] === 'export' && $method === 'GET') {
-            // ВИПРАВЛЕНО: Экспорт достижений - повертаємо JSON з даними
-            $result = $achievementsManager->getAchievements($userId, $currentUser);
+            // Экспорт достижений
+            $result = $achievementsManager->getAchievements($userId, $user);
             
             if (isset($result['error'])) {
                 sendError($result['error'], $result['code']);
             } else {
-                // Додаємо метадані для експорту
+                // Добавляем метаданные для экспорта
                 $exportData = [
                     'instructor_name' => $result['data']['full_name'],
                     'instructor_info' => [
@@ -229,13 +247,12 @@ function handleAchievementsAPI($parts, $method) {
                     'achievements' => []
                 ];
                 
-                // Збираємо досягнення - ВИПРАВЛЕНО
+                // Собираем достижения
                 $includeEmpty = isset($_GET['include_empty']) && $_GET['include_empty'] === 'true';
                 
                 for ($i = 1; $i <= 20; $i++) {
                     $achievement = $result['data']["achievement_$i"] ?? null;
                     
-                    // Завжди додаємо поле, навіть якщо воно порожнє
                     if ($achievement || $includeEmpty) {
                         $exportData['achievements'][$i] = $achievement ?? '';
                     }
@@ -265,13 +282,8 @@ function handleAchievementsAPI($parts, $method) {
             }
             
             $csvContent = file_get_contents($file['tmp_name']);
-            $result = $achievementsManager->importFromCSV($userId, $csvContent, $currentUser);
-            
-            if (isset($result['error'])) {
-                sendError($result['error'], $result['code']);
-            } else {
-                sendSuccess($result);
-            }
+            $result = $achievementsManager->importFromCSV($userId, $csvContent, $user);
+            sendResponse($result);
             
         } else {
             sendError('Invalid achievements endpoint', 404);
@@ -281,25 +293,19 @@ function handleAchievementsAPI($parts, $method) {
     }
 }
 
-// ============ ФУНКЦИИ ПОЛЬЗОВАТЕЛЕЙ ============
+// ============ ФУНКЦИИ ПОЛЬЗОВАТЕЛЕЙ (обновленные) ============
 
-function handleUsersAPI($parts, $method) {
-    $currentUser = getCurrentUser();
-    if (!$currentUser) {
-        sendError('Authentication required', 401);
-        return;
-    }
-    
+function handleUsersAPI($parts, $method, $user) {
     $userManager = new UserManager();
     
     if ($method === 'GET') {
         if (count($parts) >= 2) {
             // Получение конкретного пользователя
             $userId = intval($parts[1]);
-            $user = $userManager->getUserById($userId, $currentUser);
+            $userData = $userManager->getUserById($userId, $user);
             
-            if ($user) {
-                sendSuccess(['data' => $user]);
+            if ($userData) {
+                sendSuccess(['data' => $userData]);
             } else {
                 sendError('User not found', 404);
             }
@@ -309,13 +315,8 @@ function handleUsersAPI($parts, $method) {
             $page = intval($_GET['page'] ?? 1);
             $limit = intval($_GET['limit'] ?? 50);
             
-            $result = $userManager->getUsersList($currentUser, $filters, $page, $limit);
-            
-            if (isset($result['error'])) {
-                sendError($result['error'], $result['code']);
-            } else {
-                sendSuccess($result);
-            }
+            $result = $userManager->getUsersList($user, $filters, $page, $limit);
+            sendResponse($result);
         }
         
     } elseif ($method === 'POST') {
@@ -327,13 +328,8 @@ function handleUsersAPI($parts, $method) {
             return;
         }
         
-        $result = $userManager->createUser($input, $currentUser);
-        
-        if (isset($result['error'])) {
-            sendError($result['error'], $result['code']);
-        } else {
-            sendSuccess($result);
-        }
+        $result = $userManager->createUser($input, $user);
+        sendResponse($result);
         
     } elseif ($method === 'PUT' && count($parts) >= 2) {
         // Обновление пользователя
@@ -345,37 +341,22 @@ function handleUsersAPI($parts, $method) {
             return;
         }
         
-        $result = $userManager->updateUser($userId, $input, $currentUser);
-        
-        if (isset($result['error'])) {
-            sendError($result['error'], $result['code']);
-        } else {
-            sendSuccess($result);
-        }
+        $result = $userManager->updateUser($userId, $input, $user);
+        sendResponse($result);
         
     } elseif ($method === 'DELETE' && count($parts) >= 2) {
         // Деактивация пользователя
         $userId = intval($parts[1]);
-        $result = $userManager->deactivateUser($userId, $currentUser);
-        
-        if (isset($result['error'])) {
-            sendError($result['error'], $result['code']);
-        } else {
-            sendSuccess($result);
-        }
+        $result = $userManager->deactivateUser($userId, $user);
+        sendResponse($result);
         
     } else {
         sendError('Invalid users endpoint', 404);
     }
 }
 
-// Дополнительные endpoints для справочников
-function handleUsersReferences($parts, $method) {
-    if (!getCurrentUser()) {
-        sendError('Authentication required', 401);
-        return;
-    }
-    
+// Дополнительные endpoints для справочников (обновленные)
+function handleUsersReferences($parts, $method, $user) {
     $userManager = new UserManager();
     
     if ($parts[1] === 'roles') {
@@ -393,15 +374,9 @@ function handleUsersReferences($parts, $method) {
     }
 }
 
-// ============ ФУНКЦИИ ОТЧЕТОВ ============
+// ============ ФУНКЦИИ ОТЧЕТОВ (обновленные) ============
 
-function handleReportsAPI($parts, $method) {
-    $currentUser = getCurrentUser();
-    if (!$currentUser) {
-        sendError('Authentication required', 401);
-        return;
-    }
-    
+function handleReportsAPI($parts, $method, $user) {
     $achievementsManager = new AchievementsManager();
     
     if (count($parts) >= 2 && $parts[1] === 'statistics' && $method === 'GET') {
@@ -455,7 +430,7 @@ function handleReportsAPI($parts, $method) {
     } elseif (count($parts) >= 2 && $parts[1] === 'export' && $method === 'GET') {
         // Экспорт отчета
         $filters = $_GET;
-        $result = $achievementsManager->exportReport($currentUser, $filters);
+        $result = $achievementsManager->exportReport($user, $filters);
         
         if (isset($result['error'])) {
             sendError($result['error'], $result['code']);
@@ -471,91 +446,49 @@ function handleReportsAPI($parts, $method) {
     }
 }
 
-// ============ ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ============
+// ============ ФУНКЦИИ СИСТЕМЫ (новые) ============
 
-/**
- * Получение текущего пользователя из РЕАЛЬНОГО токена
- */
-function getCurrentUser() {
-    // Более надежное получение заголовка Authorization
-    $authHeader = null;
-    if (isset($_SERVER['HTTP_AUTHORIZATION'])) {
-        $authHeader = $_SERVER['HTTP_AUTHORIZATION'];
+function handleSystemAPI($parts, $method) {
+    if (count($parts) >= 2 && $parts[1] === 'version' && $method === 'GET') {
+        // Получение версии системы - публичный endpoint
+        try {
+            $versionInfo = Config::getVersionInfo();
+            sendSuccess($versionInfo);
+        } catch (Exception $e) {
+            sendError('Failed to get version info', 500);
+        }
+        
+    } elseif (count($parts) >= 2 && $parts[1] === 'status' && $method === 'GET') {
+        // Системный статус - только для админа
+        $middleware = new AuthMiddleware();
+        $middleware->requireRole(['admin'], function($user) {
+            try {
+                $db = Database::getInstance();
+                
+                $status = [
+                    'version' => Config::getVersion(),
+                    'environment' => Config::getEnvironment(),
+                    'database' => [
+                        'connected' => $db->isConnected(),
+                        'info' => $db->getDatabaseInfo()
+                    ],
+                    'php_version' => phpversion(),
+                    'memory_usage' => memory_get_usage(true),
+                    'uptime' => time() - $_SERVER['REQUEST_TIME']
+                ];
+                
+                sendSuccess(['status' => $status]);
+            } catch (Exception $e) {
+                sendError('Failed to get system status', 500);
+            }
+        });
+        
     } else {
-        $headers = getallheaders();
-        $authHeader = $headers['Authorization'] ?? null;
-    }
-    
-    if (!$authHeader || strpos($authHeader, 'Bearer ') !== 0) {
-        return null;
-    }
-    
-    $sessionId = substr($authHeader, 7);
-    
-    if (empty($sessionId) || strlen($sessionId) !== 64) {
-        return null;
-    }
-    
-    try {
-        $db = Database::getInstance()->getConnection();
-        
-        // Проверяем сессию в базе данных
-        $stmt = $db->prepare("
-            SELECT u.*, r.name as role_name, r.display_name as role_display_name, r.permissions,
-                   f.short_name as faculty_name, d.short_name as department_name,
-                   s.last_activity
-            FROM sessions s
-            JOIN users u ON s.user_id = u.id
-            JOIN roles r ON u.role_id = r.id
-            LEFT JOIN faculties f ON u.faculty_id = f.id
-            LEFT JOIN departments d ON u.department_id = d.id
-            WHERE s.id = ? AND u.is_active = 1
-        ");
-        
-        $stmt->execute([$sessionId]);
-        $result = $stmt->fetch();
-        
-        if (!$result) {
-            return null;
-        }
-        
-        // Проверяем, не истекла ли сессия (24 часа)
-        $lastActivity = strtotime($result['last_activity']);
-        $now = time();
-        $timeDiff = $now - $lastActivity;
-        
-        if ($timeDiff > 24 * 60 * 60) { // 24 часа в секундах
-            // Сессия истекла, удаляем её
-            $deleteStmt = $db->prepare("DELETE FROM sessions WHERE id = ?");
-            $deleteStmt->execute([$sessionId]);
-            return null;
-        }
-        
-        // Обновляем время последней активности
-        $updateStmt = $db->prepare("UPDATE sessions SET last_activity = NOW() WHERE id = ?");
-        $updateStmt->execute([$sessionId]);
-        
-        // Возвращаем данные пользователя
-        return [
-            'id' => $result['id'],
-            'employee_id' => $result['employee_id'],
-            'full_name' => $result['full_name'],
-            'email' => $result['email'],
-            'position' => $result['position'],
-            'role' => $result['role_name'],
-            'role_display' => $result['role_display_name'],
-            'permissions' => json_decode($result['permissions'] ?? '{}', true),
-            'faculty_id' => $result['faculty_id'],
-            'department_id' => $result['department_id'],
-            'faculty_name' => $result['faculty_name'],
-            'department_name' => $result['department_name']
-        ];
-        
-    } catch (Exception $e) {
-        Database::getInstance()->writeLog("getCurrentUser error: " . $e->getMessage(), 'error');
-        return null;
+        sendError('Invalid system endpoint', 404);
     }
 }
+
+// ============ ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ (без изменений) ============
 
 function sendSuccess($data, $code = 200) {
     http_response_code($code);
